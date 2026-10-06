@@ -31,6 +31,16 @@ async def agregar_vehiculo(
     return await service.agregar_vehiculo(usuario, data)
 
 
+@router.patch("/me/vehiculos/{vehiculo_id}", response_model=UsuarioRead)
+async def actualizar_vehiculo(
+    vehiculo_id: str,
+    data: VehiculoCreate,
+    usuario: Document = Depends(get_current_usuario),
+    service: UsuarioService = Depends(get_usuario_service),
+):
+    return await service.actualizar_vehiculo(usuario, vehiculo_id, data)
+
+
 @router.delete("/me/vehiculos/{vehiculo_id}", response_model=UsuarioRead)
 async def eliminar_vehiculo(
     vehiculo_id: str,

@@ -133,6 +133,23 @@ async def test_prepago_confirma_la_reserva(client):
     assert r["saldo"] == 0
 
 
+async def test_editar_y_eliminar_vehiculo(client):
+    headers, vid = await _setup_usuario(client)
+
+    res = await client.patch(f"{API}/usuarios/me/vehiculos/{vid}", headers=headers, json={
+        "placa": "xyz 789", "marca": "Kia", "modelo": "Rio", "color": "Rojo",
+    })
+    assert res.status_code == 200, res.text
+    vehiculo = res.json()["vehiculos"][0]
+    assert vehiculo["id"] == vid
+    assert vehiculo["placa"] == "XYZ789"
+    assert (vehiculo["marca"], vehiculo["modelo"], vehiculo["color"]) == ("Kia", "Rio", "Rojo")
+
+    res = await client.delete(f"{API}/usuarios/me/vehiculos/{vid}", headers=headers)
+    assert res.status_code == 200, res.text
+    assert res.json()["vehiculos"] == []
+
+
 async def test_usuario_finaliza_su_sesion_y_resumen_home(client):
     p = await _setup_parqueadero(client)
     usuario, vehiculo_id = await _setup_usuario(client)

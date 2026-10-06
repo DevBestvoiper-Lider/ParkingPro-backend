@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import List, Optional
 
 from bson import ObjectId
 from pymongo import ReturnDocument
@@ -17,6 +17,20 @@ class UsuarioRepository(BaseRepository):
         return await self.collection.find_one_and_update(
             {"_id": usuario_id},
             {"$push": {"vehiculos": vehiculo}},
+            return_document=ReturnDocument.AFTER,
+        )
+
+    async def update_vehiculo(
+        self, usuario_id: ObjectId, vehiculo_id: ObjectId, cambios: Document, unset: List[str]
+    ) -> Optional[Document]:
+        operacion: Document = {}
+        if cambios:
+            operacion["$set"] = {f"vehiculos.$.{campo}": valor for campo, valor in cambios.items()}
+        if unset:
+            operacion["$unset"] = {f"vehiculos.$.{campo}": "" for campo in unset}
+        return await self.collection.find_one_and_update(
+            {"_id": usuario_id, "vehiculos._id": vehiculo_id},
+            operacion,
             return_document=ReturnDocument.AFTER,
         )
 

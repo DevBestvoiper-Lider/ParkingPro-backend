@@ -40,6 +40,20 @@ class UsuarioService:
         vehiculo = {"_id": ObjectId(), **clean(data.model_dump())}
         return await self.repository.add_vehiculo(usuario["_id"], vehiculo)
 
+    async def actualizar_vehiculo(self, usuario: Document, vehiculo_id: str, data: VehiculoCreate) -> Document:
+        vid = parse_oid(vehiculo_id)
+        vehiculos = usuario.get("vehiculos", [])
+        if not any(v["_id"] == vid for v in vehiculos):
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "Vehículo no encontrado")
+        if any(v["placa"] == data.placa and v["_id"] != vid for v in vehiculos):
+            raise HTTPException(status.HTTP_409_CONFLICT, "Ya tienes un vehículo con esa placa")
+        campos = clean(data.model_dump())
+        unset = [campo for campo in ("marca", "modelo", "color") if campo not in campos]
+        actualizado = await self.repository.update_vehiculo(usuario["_id"], vid, campos, unset)
+        if not actualizado:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "Vehículo no encontrado")
+        return actualizado
+
     async def eliminar_vehiculo(self, usuario: Document, vehiculo_id: str) -> Document:
         actualizado = await self.repository.remove_vehiculo(usuario["_id"], parse_oid(vehiculo_id))
         if not actualizado:
