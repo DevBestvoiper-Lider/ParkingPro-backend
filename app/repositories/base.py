@@ -39,11 +39,22 @@ class BaseRepository:
         doc["_id"] = result.inserted_id
         return doc
 
-    async def update(self, doc_id: ObjectId, cambios: Document, **condiciones: Any) -> Optional[Document]:
-        """$set atómico. Devuelve None si el documento no existe o no cumple `condiciones`."""
+    async def update(
+        self,
+        doc_id: ObjectId,
+        cambios: Document,
+        unset: Optional[Sequence[str]] = None,
+        **condiciones: Any,
+    ) -> Optional[Document]:
+        """$set atómico. `unset` borra campos. None si el documento no existe o no cumple `condiciones`."""
+        operacion: Document = {}
+        if cambios:
+            operacion["$set"] = cambios
+        if unset:
+            operacion["$unset"] = {campo: "" for campo in unset}
         return await self.collection.find_one_and_update(
             {"_id": doc_id, **condiciones},
-            {"$set": cambios},
+            operacion,
             return_document=ReturnDocument.AFTER,
         )
 

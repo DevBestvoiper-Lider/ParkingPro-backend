@@ -41,6 +41,7 @@ class ParqueaderoService:
             "rol": "administrador",
             "estado": "activo",
             "password_hash": hash_password(admin.password),
+            "sesion_version": 0,
         })
         return parqueadero
 

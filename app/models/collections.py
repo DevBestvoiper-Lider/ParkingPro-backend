@@ -71,6 +71,9 @@ VALIDATORS = {
                 "rol": {"bsonType": "string", "enum": ["administrador", "operador", "cajero"]},
                 "estado": {"bsonType": "string", "enum": ["activo", "inactivo"]},
                 "password_hash": {"bsonType": "string"},  # agregado para el login
+                "sesion_version": {"bsonType": "int"},  # sube al cambiar la clave; invalida el refresh
+                "reset_token_hash": {"bsonType": "string"},
+                "reset_expira": {"bsonType": "date"},
             },
         }
     },
@@ -84,6 +87,9 @@ VALIDATORS = {
                 "email": {"bsonType": "string"},
                 "telefono": {"bsonType": "string"},
                 "password_hash": {"bsonType": "string"},  # agregado para el login
+                "sesion_version": {"bsonType": "int"},  # sube al cambiar la clave; invalida el refresh
+                "reset_token_hash": {"bsonType": "string"},
+                "reset_expira": {"bsonType": "date"},
                 "vehiculos": {
                     "bsonType": "array",
                     "items": {

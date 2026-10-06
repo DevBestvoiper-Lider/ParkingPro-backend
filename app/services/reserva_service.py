@@ -24,6 +24,7 @@ from app.schemas.auth import Principal
 from app.schemas.reserva import (
     CheckInManual, CheckOutManual, PagoCreate, ReembolsoCreate, ReservaCreate, ReservaRead,
 )
+from app.services.actividad_usuario import calcular_actividad
 from app.services.eventos import Eventos
 from app.services.notificacion_service import NotificacionService
 
@@ -144,6 +145,11 @@ class ReservaService:
             "plan": "afiliado" if suscripcion else "por_uso",
             "notificaciones_no_leidas": await self.notificaciones.no_leidas(usuario),
         }
+
+    async def actividad(self, usuario: Document) -> Document:
+        """Consumo del usuario para la pantalla Mi actividad."""
+        reservas = await self.repository.find({"usuario_id": usuario["_id"]}, limit=0)
+        return calcular_actividad(await self.enriquecer(reservas))
 
     # ---------- Ciclo de vida ----------
 

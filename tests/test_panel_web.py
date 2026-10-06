@@ -1,7 +1,8 @@
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, time, timedelta, timezone
 
 import pytest
 
+from app.core.utils import ZONA
 from tests.test_parkingpro import API, _reserva_body, _setup_parqueadero, _setup_usuario
 
 pytestmark = pytest.mark.asyncio
@@ -117,7 +118,13 @@ async def test_dashboard_estadisticas_y_actividad(client):
     r = res.json()
     await client.post(f"{API}/reservas/{r['id']}/entrada", headers=p["admin"])
     await client.post(f"{API}/reservas/{r['id']}/pagos", headers=p["admin"], json={"monto": 4500, "metodo_pago": "efectivo"})
-    body = _reserva_body(p, vehiculo_id, ahora + timedelta(minutes=30))
+    # +30 min junto a la medianoche (Colombia) cae al día siguiente y sale de las estadísticas del día.
+    # El inicio sigue siendo futuro y dentro de la próxima hora, para que cuente como plaza reservada.
+    medianoche = datetime.combine(ahora.astimezone(ZONA).date() + timedelta(days=1), time.min, tzinfo=ZONA)
+    inicio_proxima = ahora + timedelta(minutes=30)
+    if inicio_proxima >= medianoche:
+        inicio_proxima = medianoche - timedelta(seconds=2)
+    body = _reserva_body(p, vehiculo_id, inicio_proxima)
     body["espacio_id"] = plazas[1]["id"]
     await client.post(f"{API}/reservas", headers=usuario, json=body)
 

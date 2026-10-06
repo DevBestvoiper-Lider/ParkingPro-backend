@@ -21,6 +21,7 @@ class UsuarioService:
             "email": email,
             "telefono": data.telefono,
             "password_hash": hash_password(data.password),
+            "sesion_version": 0,
             "vehiculos": [],
         }))
 
@@ -28,6 +29,7 @@ class UsuarioService:
         cambios = clean(data.model_dump(exclude={"password"}))
         if data.password:
             cambios["password_hash"] = hash_password(data.password)
+            cambios["sesion_version"] = usuario.get("sesion_version", 0) + 1
         if not cambios:
             return usuario
         return await self.repository.update(usuario["_id"], cambios)

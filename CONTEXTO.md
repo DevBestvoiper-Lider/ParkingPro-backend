@@ -4,7 +4,7 @@ Documento para retomar el trabajo sin depender de conversaciones anteriores. El 
 de endpoints, arranque y reglas de negocio está en [README.md](README.md); aquí va el **porqué**,
 el estado y lo que sigue.
 
-_Última actualización: 2026-09-30_
+_Última actualización: 2026-10-05_
 
 ## Qué es
 
@@ -35,8 +35,10 @@ parqueaderos disponibles en tiempo real en **Cartagena de Indias**.
 
 ## Estado actual
 
-- **Backend: completo.** Está en `/Users/Luis_Sandon/flutter/backend` y tiene 30 tests pasando.
-  Se probó de punta a punta contra Atlas.
+- **Backend: completo y desplegado.** El código está en `/Users/Luis_Sandon/flutter/backend` y tiene 30 tests pasando.
+  - **Servidor (desde 2026-10-01):** `http://bestcontactcenter.bestvoiper.com:8000` (Swagger en `/docs`).
+    Se verificaron salud, rutas, datos del demo, login y WebSocket.
+  - **Sin HTTPS todavía** (ver "Pendiente para producción").
 - **Frontend: en construcción.** Está en `/Users/Luis_Sandon/flutter/app` (paquete `parkingpro`, org `co.parkingpro`,
   plataformas android, ios y web). Tiene 26 tests pasando.
   - **Hechas:** Bienvenida, Login, Registro, Inicio, Perfil, Mapa GPS y el flujo de reserva completo, más la barra inferior.
@@ -88,6 +90,8 @@ Las colecciones originales del equipo son `parqueaderos`, `empleados`, `usuarios
 **Cambios agregados**, que hay que reflejar en Moon Modeler:
 
 - `usuarios.password_hash` y `empleados.password_hash`: login.
+- `sesion_version`, `reset_token_hash` y `reset_expira` en usuarios y empleados: el refresh token
+  lleva la versión, y al cambiar la clave sube. El enlace de recuperación guarda solo el hash y vence a los 30 min.
 - `parqueaderos.sedes[].ubicacion`: GeoJSON `Point [longitud, latitud]`, para el mapa.
 - `reservas.codigo`: `Rsv-000123`.
 - `reservas.tarifa_aplicada.descuento_pct`: plan Afiliado.
@@ -132,11 +136,16 @@ Los validadores viven en `app/models/collections.py`. Para aplicarlos en Atlas c
    y `tasks/jobs.py`.
 2. **Notificaciones push** con Firebase Cloud Messaging. Hoy solo se guardan en la base
    (`TODO` en `notificacion_service.py`).
-3. **Recuperar contraseña y refresh tokens.** El JWT dura `ACCESS_TOKEN_EXPIRE_MINUTES` (60).
-4. **Vincular walk-in con registro posterior:** si un cliente ocasional se registra luego con su placa,
+3. **Vincular walk-in con registro posterior:** si un cliente ocasional se registra luego con su placa,
    hoy no se unen sus historiales.
-5. **Emails reales.** `tasks/background.py` solo escribe en el log.
-6. **Deploy:** hay `Dockerfile`, pero falta elegir hosting (Render, Railway, Fly.io…).
+4. **Emails reales.** `tasks/background.py` solo escribe en el log. Con `DEBUG=true` imprime el token
+   de recuperación para poder probar el flujo sin correo.
+5. **HTTPS en el servidor.** Hoy la API va por HTTP en `bestcontactcenter.bestvoiper.com:8000`, así que el
+   token y las contraseñas viajan sin cifrar. Para que la app funcione se agregaron excepciones solo para
+   `bestvoiper.com`: `NSExceptionDomains` en `ios/Runner/Info.plist` y `res/xml/network_security_config.xml`
+   en Android. Con HTTPS (por ejemplo, Caddy o nginx con Let's Encrypt delante de uvicorn):
+   - Cambiar `Env.servidor` a `https://…` (y el WebSocket pasa solo a `wss://`).
+   - Quitar esas excepciones.
 
 ## Próximos pasos: frontend en Flutter
 
@@ -237,16 +246,23 @@ La API debe estar corriendo (`uvicorn ... --host 0.0.0.0`).
    - Si la API responde 409 (plaza tomada u hora pico), vuelve a la grilla.
 4. **Confirmación:** código `Rsv-…`, detalle y botón "Pagar" si quedó pendiente.
 
+
+### Flujo Creacion de Carro (hecho)
+
+1. **Nuevo Carro:**
+  -
+
 ### Instalar en un iPhone físico
 
 ```bash
 cd /Users/Luis_Sandon/flutter/app
-flutter build ios --release --dart-define=API_URL=http://<IP-del-Mac>:8000/api/v1
+flutter build ios --release                           # apunta al servidor (Env.servidor)
 flutter install --release -d <id-del-iphone>          # flutter devices muestra el id
 ```
 
-- **Red:** el iPhone y el Mac deben estar en la misma WiFi, y la API debe correr con `--host 0.0.0.0`.
-  El 2026-09-30 la IP del Mac era `192.168.0.143`; si cambia, hay que recompilar con la nueva.
+- **URL de la API:** las versiones release usan el servidor desplegado; las de desarrollo, la API local.
+  Para una release contra la Mac: `--dart-define=API_URL=http://<IP-del-Mac>:8000/api/v1`.
+- **Para instalar:** el iPhone debe estar desbloqueado y conectado por cable (o en la misma red que el Mac).
 - **Release, no debug:** una build de debug en un iPhone físico solo abre conectada a `flutter run`.
 - **Firma:** automática con el equipo `3434FN38D7` (certificado Apple Development de Luis). Si es una cuenta
   de Apple gratuita, la app **vence a los 7 días** y hay que reinstalarla. La primera vez, en el iPhone:
@@ -281,7 +297,14 @@ Pagos, Clientes, Vehículos, Tarifas, Reportes, Usuarios, Sedes y Zonas, y Confi
   - Simulador iOS o web: `http://localhost:8000/api/v1`.
   - Celular físico: la IP de la Mac.
 - **Login:** se envía `application/x-www-form-urlencoded` con `username` (el email) y `password`.
-  Responde `{access_token, tipo}`; luego se usa `Authorization: Bearer <token>`.
+  Responde `{access_token, refresh_token, tipo}`. El access dura 60 min; `POST /auth/refresh`
+  con `{refresh_token}` devuelve otro par, sin pedir la clave. El refresh no sirve como Bearer.
+  `POST /auth/recuperar` siempre responde el mismo mensaje. `POST /auth/restablecer` con el token
+  del correo cambia la clave e invalida la sesión anterior.
+- **Mi actividad:** `GET /reservas/mias/actividad`. Gasto de los últimos 6 meses (hora de Colombia),
+  tendencia contra el mes anterior, horas, completadas, canceladas, sedes y vehículos más usados,
+  promedio por visita y ahorro Afiliado. Si ninguna visita tuvo descuento, `ahorro_es_estimado` es
+  true: es lo que habría ahorrado con el 15 %. No hay colección nueva.
 - **Fechas:** enviarlas en ISO 8601 con zona horaria, por ejemplo `DateTime.toUtc().toIso8601String()`.
 - **Interés en vivo:** llamar `POST /sedes/{id}/interes` al abrir una sede y cada ~60 s.
   Los invitados mandan un `dispositivo_id` aleatorio que la app guarda.

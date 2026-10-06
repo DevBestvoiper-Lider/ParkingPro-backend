@@ -27,18 +27,20 @@ class EmpleadoService:
             "rol": data.rol,
             "estado": "activo",
             "password_hash": hash_password(data.password),
+            "sesion_version": 0,
         })
 
     async def actualizar(self, admin: Document, empleado_id: str, data: EmpleadoUpdate) -> Document:
         eid = parse_oid(empleado_id)
         if eid == admin["_id"] and (data.rol not in (None, "administrador") or data.estado == "inactivo"):
             raise HTTPException(status.HTTP_409_CONFLICT, "No puedes quitarte el rol de administrador ni desactivarte")
-        cambios = clean(data.model_dump(exclude={"password"}))
-        if data.password:
-            cambios["password_hash"] = hash_password(data.password)
         empleado = await self.repository.get(eid, parqueadero_id=admin["parqueadero_id"])
         if not empleado:
             raise HTTPException(status.HTTP_404_NOT_FOUND, "Empleado no encontrado")
+        cambios = clean(data.model_dump(exclude={"password"}))
+        if data.password:
+            cambios["password_hash"] = hash_password(data.password)
+            cambios["sesion_version"] = empleado.get("sesion_version", 0) + 1
         if not cambios:
             return empleado
         return await self.repository.update(eid, cambios)

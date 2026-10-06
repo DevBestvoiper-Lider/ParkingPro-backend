@@ -6,7 +6,7 @@ from pymongo.asynchronous.database import AsyncDatabase
 
 from app.core.database import get_db
 from app.core.realtime import HubTiempoReal, hub
-from app.core.security import decode_access_token
+from app.core.security import decode_jwt
 from app.core.utils import parse_oid
 from app.repositories.actividad_repository import ActividadRepository
 from app.repositories.alerta_repository import AlertaRepository
@@ -212,7 +212,10 @@ async def get_principal(
         "No se pudo validar el token",
         headers={"WWW-Authenticate": "Bearer"},
     )
-    subject = decode_access_token(token) or ""
+    payload = decode_jwt(token)
+    if not payload or payload.get("typ") == "refresh":
+        raise no_autorizado
+    subject = payload.get("sub") or ""
     tipo, _, raw_id = subject.partition(":")
     if tipo == "usuario":
         doc = await usuarios.get(parse_oid(raw_id))
@@ -220,7 +223,7 @@ async def get_principal(
         doc = await empleados.get(parse_oid(raw_id), estado="activo")
     else:
         raise no_autorizado
-    if doc is None:
+    if doc is None or doc.get("sesion_version", 0) != payload.get("ver", 0):
         raise no_autorizado
     return Principal(tipo, doc)
 

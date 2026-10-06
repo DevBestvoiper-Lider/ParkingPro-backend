@@ -59,8 +59,10 @@ Con Docker: `docker build -t parkingpro-api . && docker run --env-file .env -p 8
 
 | Pantalla | Endpoint |
 |---|---|
-| Login / Registro | `POST /auth/usuarios/login` · `POST /auth/usuarios/registro` |
+| Login / Registro | `POST /auth/usuarios/login` · `POST /auth/usuarios/registro` · `POST /auth/refresh` |
+| Recuperar clave | `POST /auth/recuperar` · `POST /auth/restablecer` |
 | Inicio | `GET /reservas/mias/resumen` (próximas, vehículos, sesión activa, plan, notificaciones sin leer) |
+| Mi actividad | `GET /reservas/mias/actividad` (gasto por mes, horas, sedes, ahorro Afiliado) |
 | Mapa GPS | `GET /parqueaderos/cercanos?latitud&longitud&radio_km&tipo&q` (distancia, $/h desde, libres, interesados) |
 | Nueva reserva | `GET /espacios/zonas?sede_id` · `GET /tarifas?sede_id` |
 | Selecciona tu plaza | `GET /espacios/plazas?sede_id&fecha_inicio&fecha_fin&zona` (`estado_horario`, `interesados`) |
@@ -78,7 +80,7 @@ Con Docker: `docker build -t parkingpro-api . && docker run --env-file .env -p 8
 
 | Sección | Endpoint |
 |---|---|
-| Login | `POST /auth/empleados/login` |
+| Login | `POST /auth/empleados/login` · `POST /auth/refresh` · `POST /auth/recuperar` |
 | Dashboard | `GET /admin/dashboard?sede_id` |
 | Reservas | `GET /reservas?q&estado&zona&sede_id&desde&hasta` · `GET /admin/reservas/estadisticas?fecha` · `GET /admin/reservas/exportar` |
 | Operación | `GET /espacios/plazas` · `PATCH /espacios/{id}` · `POST /reservas/check-in-manual` · `POST /reservas/check-out-manual` · `POST /reservas/{id}/entrada\|salida\|confirmar\|cancelar` |
@@ -127,6 +129,8 @@ Sin Redis funciona con **un proceso**. Para varios workers o instancias, define 
 ## Cambios al modelo original (para Moon Modeler)
 
 - `usuarios.password_hash` y `empleados.password_hash`: para el login.
+- `sesion_version`, `reset_token_hash` y `reset_expira` en usuarios y empleados: refresh token y recuperar contraseña.
+  Cambiar la clave sube `sesion_version` y deja sin efecto los tokens anteriores.
 - `sedes[].ubicacion`: GeoJSON `Point [longitud, latitud]`, para el mapa.
 - `reservas.codigo` (`Rsv-000123`), `reservas.tarifa_aplicada.descuento_pct`, `reservas.pagos[].codigo` (`TX-000045`),
   y el estado de pago `reembolsado`.
@@ -151,7 +155,8 @@ pytest
 - **Pasarela de pagos real** (Wompi, ePayco o Mercado Pago). Hoy los pagos por `app` y las suscripciones
   se aprueban sin cobrar; están marcados con `TODO`.
 - **Notificaciones push** con Firebase Cloud Messaging. Hoy las notificaciones solo se guardan en la base.
-- **Recuperar contraseña y refresh tokens.** El token dura `ACCESS_TOKEN_EXPIRE_MINUTES`.
+- **Emails reales.** `tasks/background.py` solo escribe en el log (bienvenida, reserva y recuperación).
+  Con `DEBUG=true` el log incluye el token de recuperación, para probarlo sin correo.
 # ParkingPro-backend
 # ParkingPro-backend
 # ParkingPro-backend

@@ -14,7 +14,8 @@ from app.models.enums import EstadoReserva
 from app.repositories.base import Document
 from app.schemas.auth import Principal
 from app.schemas.reserva import (
-    CheckInManual, CheckOutManual, PagoCreate, ReembolsoCreate, ReservaCreate, ReservaRead, ResumenUsuario,
+    ActividadUsuario, CheckInManual, CheckOutManual, PagoCreate, ReembolsoCreate, ReservaCreate, ReservaRead,
+    ResumenUsuario,
 )
 from app.services.reserva_service import ReservaService
 from app.tasks.background import send_reserva_email
@@ -41,6 +42,15 @@ async def resumen_usuario(
 ):
     """Pantalla de Inicio: reservas próximas, vehículos y sesión activa."""
     return await service.resumen(usuario)
+
+
+@router.get("/mias/actividad", response_model=ActividadUsuario)
+async def actividad_usuario(
+    usuario: Document = Depends(get_current_usuario),
+    service: ReservaService = Depends(get_reserva_service),
+):
+    """Total gastado, horas, sedes y ahorro del plan. Se calcula con las reservas; no hay colección nueva."""
+    return await service.actividad(usuario)
 
 
 @router.get("/mias", response_model=List[ReservaRead])

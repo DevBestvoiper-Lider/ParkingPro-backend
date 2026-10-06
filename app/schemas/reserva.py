@@ -138,3 +138,30 @@ class ResumenUsuario(BaseModel):
     sesion_activa: Optional[ReservaRead] = None
     plan: Literal["por_uso", "afiliado"]
     notificaciones_no_leidas: int
+
+
+class GastoMes(BaseModel):
+    mes: str  # YYYY-MM, hora de Colombia
+    total: Money
+
+
+class UsoFrecuente(BaseModel):
+    id: str
+    nombre: str
+    visitas: int
+
+
+class ActividadUsuario(BaseModel):
+    """Pantalla Mi actividad. Sale de las reservas; no se guarda aparte."""
+
+    total_gastado: Money
+    gasto_por_mes: List[GastoMes]
+    tendencia_pct: Optional[float] = None  # mes actual contra el anterior; null si el anterior fue $0
+    horas_estacionado: float
+    reservas_completadas: int
+    reservas_canceladas: int
+    sedes_mas_usadas: List[UsoFrecuente]
+    vehiculos_mas_usados: List[UsoFrecuente]
+    promedio_por_visita: Money
+    ahorro_afiliado: Money
+    ahorro_es_estimado: bool  # true: cuánto habría ahorrado con el plan; false: ahorro ya aplicado

@@ -2,15 +2,33 @@ from dataclasses import dataclass
 from typing import Any, Dict, Literal
 
 from bson import ObjectId
-from pydantic import BaseModel
+from pydantic import BaseModel, EmailStr, Field
 
 TipoCuenta = Literal["usuario", "empleado"]
 
 
 class Token(BaseModel):
     access_token: str
+    refresh_token: str
     token_type: str = "bearer"
     tipo: TipoCuenta
+
+
+class RefreshRequest(BaseModel):
+    refresh_token: str
+
+
+class RecuperarClave(BaseModel):
+    email: EmailStr
+
+
+class RestablecerClave(BaseModel):
+    token: str = Field(min_length=20)
+    password: str = Field(min_length=8)
+
+
+class Mensaje(BaseModel):
+    mensaje: str
 
 
 @dataclass
