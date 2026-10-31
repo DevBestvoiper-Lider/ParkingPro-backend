@@ -2,6 +2,8 @@
 from pymongo import ASCENDING, DESCENDING, IndexModel
 from pymongo.asynchronous.database import AsyncDatabase
 
+from app.models.enums import PERMISOS
+
 PARQUEADEROS = "parqueaderos"
 EMPLEADOS = "empleados"
 USUARIOS = "usuarios"
@@ -14,6 +16,9 @@ SUSCRIPCIONES = "suscripciones"
 NOTIFICACIONES = "notificaciones"
 ALERTAS_CUPO = "alertas_cupo"
 INTERESADOS = "interesados"  # quién está viendo una sede/plaza (expira solo)
+SOCIOS = "socios"  # dueños de parqueaderos
+AUDITORIA = "auditoria"  # historial permanente de cambios (no expira)
+LIQUIDACIONES = "liquidaciones"  # corte semanal por socio
 
 VALIDATORS = {
     PARQUEADEROS: {
@@ -28,6 +33,26 @@ VALIDATORS = {
                 "telefono": {"bsonType": "string"},
                 "estado": {"bsonType": "string", "enum": ["activo", "suspendido", "en_prueba"]},
                 "fecha_registro": {"bsonType": "date"},
+                "socio_id": {"bsonType": "objectId"},  # agregado: dueño del parqueadero
+                # agregado: prueba pactada al crearlo (copia de la política)
+                "condiciones": {
+                    "bsonType": "object",
+                    "properties": {
+                        "comision_prueba_pct": {"bsonType": "int", "minimum": 0, "maximum": 100},
+                        "prueba_hasta": {"bsonType": "date"},
+                        "politica": {"bsonType": "string"},
+                    },
+                },
+                # agregado: por qué está suspendido y a qué estado vuelve al reactivarse
+                "suspension": {
+                    "bsonType": "object",
+                    "required": ["motivo", "desde", "estado_anterior"],
+                    "properties": {
+                        "motivo": {"bsonType": "string", "enum": ["deuda"]},
+                        "desde": {"bsonType": "date"},
+                        "estado_anterior": {"bsonType": "string", "enum": ["activo", "en_prueba"]},
+                    },
+                },
                 "sedes": {
                     "bsonType": "array",
                     "items": {
@@ -63,9 +88,27 @@ VALIDATORS = {
         "$jsonSchema": {
             "bsonType": "object",
             "title": "empleados",
-            "required": ["parqueadero_id", "nombre", "email", "rol", "estado"],
+            "required": ["nombre", "email", "rol", "estado"],
             "properties": {
+                # Legado: el parqueadero único de antes. Desde los socios manda `accesos`.
                 "parqueadero_id": {"bsonType": "objectId"},
+                # Agregado: parqueaderos donde trabaja. Solo un administrador guarda permisos;
+                # operador y cajero tienen los de su rol y un solo acceso.
+                "accesos": {
+                    "bsonType": "array",
+                    "minItems": 1,
+                    "items": {
+                        "bsonType": "object",
+                        "required": ["parqueadero_id", "permisos"],
+                        "properties": {
+                            "parqueadero_id": {"bsonType": "objectId"},
+                            "permisos": {
+                                "bsonType": "array",
+                                "items": {"bsonType": "string", "enum": sorted(PERMISOS)},
+                            },
+                        },
+                    },
+                },
                 "nombre": {"bsonType": "string"},
                 "email": {"bsonType": "string"},
                 "rol": {"bsonType": "string", "enum": ["administrador", "operador", "cajero"]},
@@ -182,6 +225,11 @@ VALIDATORS = {
                             "fecha_pago": {"bsonType": "date"},
                             "metodo_pago": {"bsonType": "string", "enum": ["efectivo", "tarjeta", "app"]},
                             "estado": {"bsonType": "string", "enum": ["pendiente", "pagado", "rechazado", "reembolsado"]},
+                            # agregado (socios): comisión aplicada y descuento Afiliado que asume ParkingPro.
+                            # En un reembolso, comision = 0 (ParkingPro la conserva) y la compensación se revierte.
+                            "comision_pct": {"bsonType": "int"},
+                            "comision": {"bsonType": "decimal", "minimum": 0},
+                            "compensacion": {"bsonType": "decimal", "minimum": 0},
                         },
                     },
                 },
@@ -261,15 +309,111 @@ VALIDATORS.update({
     },
 })
 
+# ---- Capa de socios ----
+VALIDATORS.update({
+    SOCIOS: {
+        "$jsonSchema": {
+            "bsonType": "object",
+            "title": "socios",
+            "required": ["nombre", "email", "estado", "fecha_registro"],
+            "properties": {
+                "nombre": {"bsonType": "string"},
+                "email": {"bsonType": "string"},
+                "telefono": {"bsonType": "string"},
+                "estado": {"bsonType": "string", "enum": ["activo", "inactivo"]},
+                "fecha_registro": {"bsonType": "date"},
+                "password_hash": {"bsonType": "string"},
+                "sesion_version": {"bsonType": "int"},
+                "reset_token_hash": {"bsonType": "string"},
+                "reset_expira": {"bsonType": "date"},
+                # Lo pactado al aprobarlo (copia de la política)
+                "condiciones": {
+                    "bsonType": "object",
+                    "required": ["comision_pct", "limite_deuda", "dias_gracia"],
+                    "properties": {
+                        "comision_pct": {"bsonType": "int", "minimum": 0, "maximum": 100},
+                        "limite_deuda": {"bsonType": "int", "minimum": 0},
+                        "dias_gracia": {"bsonType": "int", "minimum": 0},
+                        "politica": {"bsonType": "string"},
+                    },
+                },
+                "liquida_desde": {"bsonType": "date"},  # los pagos anteriores no se liquidan
+                "deuda": {
+                    "bsonType": "object",
+                    "properties": {
+                        "aviso_pct": {"bsonType": "int", "enum": [80, 100]},  # último aviso enviado
+                        "excedida_desde": {"bsonType": "date"},  # empieza a contar la gracia
+                    },
+                },
+            },
+        }
+    },
+    LIQUIDACIONES: {
+        "$jsonSchema": {
+            "bsonType": "object",
+            "title": "liquidaciones",
+            "required": [
+                "socio_id", "semana_inicio", "semana_fin", "pagos_app", "compensacion", "comision_app",
+                "comision_caja", "reembolsos_app", "saldo_anterior", "total", "estado", "fecha_generada",
+            ],
+            "properties": {
+                "socio_id": {"bsonType": "objectId"},
+                "semana_inicio": {"bsonType": "date"},  # lunes 00:00 hora de Colombia
+                "semana_fin": {"bsonType": "date"},
+                "pagos_app": {"bsonType": "decimal"},
+                "compensacion": {"bsonType": "decimal"},
+                "comision_app": {"bsonType": "decimal"},
+                "comision_caja": {"bsonType": "decimal"},
+                "reembolsos_app": {"bsonType": "decimal"},
+                "saldo_anterior": {"bsonType": "decimal"},
+                "total": {"bsonType": "decimal"},  # positivo: ParkingPro transfiere; negativo: el socio debe
+                "estado": {"bsonType": "string", "enum": ["pendiente", "trasladada", "pagada"]},
+                "fecha_generada": {"bsonType": "date"},
+            },
+        }
+    },
+    AUDITORIA: {
+        "$jsonSchema": {
+            "bsonType": "object",
+            "title": "auditoria",
+            "required": ["fecha", "actor", "accion", "entidad", "entidad_id"],
+            "properties": {
+                "fecha": {"bsonType": "date"},
+                "actor": {
+                    "bsonType": "object",
+                    "required": ["tipo", "id", "nombre"],
+                    "properties": {
+                        "tipo": {"bsonType": "string", "enum": ["socio", "empleado", "sistema"]},
+                        "id": {"bsonType": ["objectId", "null"]},
+                        "nombre": {"bsonType": "string"},
+                    },
+                },
+                "accion": {"bsonType": "string", "enum": [
+                    "crear", "actualizar", "eliminar", "dar_acceso", "quitar_acceso",
+                ]},
+                "entidad": {"bsonType": "string", "enum": [
+                    "socio", "parqueadero", "sede", "empleado", "tarifa",
+                ]},
+                "entidad_id": {"bsonType": "objectId"},
+                "parqueadero_id": {"bsonType": "objectId"},
+                "antes": {"bsonType": "object"},
+                "despues": {"bsonType": "object"},
+            },
+        }
+    },
+})
+
 INDEXES = {
     PARQUEADEROS: [
         IndexModel([("nit", ASCENDING)], unique=True),
         IndexModel([("sedes._id", ASCENDING)]),
         IndexModel([("sedes.ciudad", ASCENDING)]),
+        IndexModel([("socio_id", ASCENDING)]),
     ],
     EMPLEADOS: [
         IndexModel([("email", ASCENDING)], unique=True),
         IndexModel([("parqueadero_id", ASCENDING)]),
+        IndexModel([("accesos.parqueadero_id", ASCENDING)]),
     ],
     USUARIOS: [
         IndexModel([("email", ASCENDING)], unique=True),
@@ -306,6 +450,12 @@ INDEXES.update({
     INTERESADOS: [
         IndexModel([("sede_id", ASCENDING), ("expira", ASCENDING)]),
         IndexModel([("expira", ASCENDING)], expireAfterSeconds=0),
+    ],
+    SOCIOS: [IndexModel([("email", ASCENDING)], unique=True)],
+    LIQUIDACIONES: [IndexModel([("socio_id", ASCENDING), ("semana_inicio", DESCENDING)], unique=True)],
+    AUDITORIA: [
+        IndexModel([("parqueadero_id", ASCENDING), ("fecha", DESCENDING)]),
+        IndexModel([("entidad", ASCENDING), ("entidad_id", ASCENDING), ("fecha", DESCENDING)]),
     ],
 })
 

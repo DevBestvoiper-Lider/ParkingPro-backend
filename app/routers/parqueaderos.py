@@ -2,7 +2,7 @@ from typing import List, Optional
 
 from fastapi import APIRouter, Depends, Query, status
 
-from app.dependencies import get_current_admin, get_mapa_service, get_parqueadero_service
+from app.dependencies import get_mapa_service, get_parqueadero_service, require_permiso
 from app.models.enums import TipoEspacio
 from app.repositories.base import Document
 from app.schemas.parqueadero import (
@@ -24,7 +24,7 @@ async def registrar_parqueadero(
     data: ParqueaderoCreate,
     service: ParqueaderoService = Depends(get_parqueadero_service),
 ):
-    """Alta de un parqueadero junto con su primer administrador."""
+    """Alta de un socio (dueño) con su primer parqueadero y, si se indica, su primer administrador."""
     return await service.registrar(data)
 
 
@@ -60,7 +60,7 @@ async def obtener_parqueadero(parqueadero_id: str, service: ParqueaderoService =
 async def actualizar_parqueadero(
     parqueadero_id: str,
     data: ParqueaderoUpdate,
-    admin: Document = Depends(get_current_admin),
+    admin: Document = Depends(require_permiso("editar_configuracion")),
     service: ParqueaderoService = Depends(get_parqueadero_service),
 ):
     return await service.actualizar(parqueadero_id, data, admin)
@@ -70,7 +70,7 @@ async def actualizar_parqueadero(
 async def agregar_sede(
     parqueadero_id: str,
     data: SedeCreate,
-    admin: Document = Depends(get_current_admin),
+    admin: Document = Depends(require_permiso("gestionar_sedes")),
     service: ParqueaderoService = Depends(get_parqueadero_service),
 ):
     return await service.agregar_sede(parqueadero_id, data, admin)
@@ -81,7 +81,7 @@ async def actualizar_sede(
     parqueadero_id: str,
     sede_id: str,
     data: SedeUpdate,
-    admin: Document = Depends(get_current_admin),
+    admin: Document = Depends(require_permiso("gestionar_sedes")),
     service: ParqueaderoService = Depends(get_parqueadero_service),
 ):
     return await service.actualizar_sede(parqueadero_id, sede_id, data, admin)

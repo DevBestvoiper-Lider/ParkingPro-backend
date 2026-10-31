@@ -82,7 +82,11 @@ async def crear_demo(db) -> bool:
         prefijo = "admin" if i == 0 else "admin.getsemani"
         empleados = [(f"{prefijo}@{DOMINIO}", "Juan Administrador", "administrador")]
         if i == 0:
-            empleados += [(f"operador@{DOMINIO}", "Ana Operadora", "operador"), (f"cajero@{DOMINIO}", "Luis Cajero", "cajero")]
+            empleados += [
+                (f"operador@{DOMINIO}", "Ana Operadora", "operador"),
+                (f"cajero@{DOMINIO}", "Luis Cajero", "cajero"),
+                ("luisda3231@gmail.com", "Luis Sandon", "administrador"),
+            ]
         await db[c.EMPLEADOS].insert_many([
             {"parqueadero_id": pid, "nombre": n, "email": e, "rol": r, "estado": "activo", "password_hash": password}
             for e, n, r in empleados
@@ -190,5 +194,6 @@ async def crear_demo(db) -> bool:
 
     print(f"Demo de Cartagena creado: {len(sedes_info)} sedes, {sum(n for n, _ in ZONAS.values())} plazas por sede, "
           f"{len(clientes)} clientes, {total_reservas} reservas.")
-    print(f"  Panel web: admin@{DOMINIO} · App: carlos.perez@{DOMINIO} (Afiliado) · contraseña: SEED_PASSWORD")
+    print(f"  Panel web: admin@{DOMINIO} · App: carlos.perez@{DOMINIO} (Afiliado) · "
+          f"cámara/admin: luisda3231@gmail.com · contraseña: SEED_PASSWORD")
     return True

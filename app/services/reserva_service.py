@@ -7,6 +7,7 @@ from typing import List, Optional, Tuple
 from bson import ObjectId
 from fastapi import HTTPException, status
 
+from app.core.comision import comision_pct, montos_de_pago
 from app.core.config import settings
 from app.core.utils import (
     as_utc, clean, formato_fecha_hora, formato_pesos, parse_oid, to_decimal, to_decimal128, utcnow,
@@ -17,6 +18,7 @@ from app.repositories.contador_repository import ContadorRepository
 from app.repositories.espacio_repository import EspacioRepository
 from app.repositories.parqueadero_repository import ParqueaderoRepository
 from app.repositories.reserva_repository import ESTADOS_ACTIVOS, ReservaRepository
+from app.repositories.socio_repository import SocioRepository
 from app.repositories.suscripcion_repository import SuscripcionRepository
 from app.repositories.tarifa_repository import TarifaRepository
 from app.repositories.usuario_repository import UsuarioRepository
@@ -41,6 +43,7 @@ class ReservaService:
         suscripciones: SuscripcionRepository,
         eventos: Eventos,
         notificaciones: NotificacionService,
+        socios: SocioRepository,
     ):
         self.repository = repository
         self.espacios = espacios
@@ -51,6 +54,7 @@ class ReservaService:
         self.suscripciones = suscripciones
         self.eventos = eventos
         self.notificaciones = notificaciones
+        self.socios = socios
 
     # ---------- Consultas ----------
 
@@ -256,7 +260,7 @@ class ReservaService:
         })
         if not reserva:
             raise HTTPException(status.HTTP_404_NOT_FOUND, f"No hay una sesión activa para {data.placa}")
-        return await self.registrar_salida(Principal("empleado", empleado), str(reserva["_id"]))
+        return await self.registrar_salida(Principal(empleado["cuenta"], empleado), str(reserva["_id"]))
 
     async def confirmar(self, empleado: Document, reserva_id: str) -> Document:
         reserva = await self._de_parqueadero(empleado, reserva_id)
@@ -277,7 +281,7 @@ class ReservaService:
             raise HTTPException(status.HTTP_409_CONFLICT, "La reserva no se puede cancelar en su estado actual")
         actualizada = await self._enriquecer_uno(actualizada)
         await self._evento(actualizada, "reserva_cancelada", f"{actualizada['codigo']} · {actualizada.get('placa', '')}")
-        if principal.es_empleado:
+        if principal.es_personal:
             await self.notificaciones.notificar(
                 actualizada["usuario_id"], "Reserva cancelada",
                 f"El parqueadero canceló tu reserva {actualizada['codigo']}.", reserva_id=actualizada["_id"],
@@ -328,7 +332,7 @@ class ReservaService:
     async def registrar_pago(self, principal: Principal, reserva_id: str, data: PagoCreate) -> Document:
         if principal.es_usuario and data.metodo_pago != "app":
             raise HTTPException(status.HTTP_403_FORBIDDEN, "Desde la app solo se puede pagar con metodo_pago 'app'")
-        if principal.es_empleado and data.metodo_pago == "app":
+        if principal.es_personal and data.metodo_pago == "app":
             raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "En caja usa 'efectivo' o 'tarjeta'")
 
         reserva = await self._obtener(principal, reserva_id)
@@ -340,7 +344,7 @@ class ReservaService:
             raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, f"El monto supera el saldo pendiente ({saldo})")
 
         # TODO: con una pasarela real, los pagos 'app' deberían quedar 'pendiente' hasta su confirmación.
-        pago = await self._nuevo_pago(data.monto, data.metodo_pago, "pagado")
+        pago = await self._nuevo_pago(data.monto, data.metodo_pago, "pagado", reserva)
         actualizada = await self.repository.add_pago(reserva["_id"], pago)
         await self._evento(await self._enriquecer_uno(actualizada), "pago",
                            f"{formato_pesos(data.monto)} – {reserva['codigo']} ({data.metodo_pago})")
@@ -357,7 +361,7 @@ class ReservaService:
         pagado = ReservaRead.model_validate(reserva).total_pagado
         if data.monto > pagado:
             raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, f"No se puede reembolsar más de lo pagado ({pagado})")
-        pago = await self._nuevo_pago(data.monto, data.metodo_pago, "reembolsado")
+        pago = await self._nuevo_pago(data.monto, data.metodo_pago, "reembolsado", reserva)
         actualizada = await self._enriquecer_uno(await self.repository.add_pago(reserva["_id"], pago))
         await self._evento(actualizada, "reembolso", f"-{formato_pesos(data.monto)} – {reserva['codigo']}")
         await self.notificaciones.notificar(
@@ -431,14 +435,26 @@ class ReservaService:
             "pagos": [],
         }
 
-    async def _nuevo_pago(self, monto: Decimal, metodo: str, estado: str) -> Document:
+    async def _nuevo_pago(self, monto: Decimal, metodo: str, estado: str, reserva: Document) -> Document:
+        """Guarda la comisión que aplica hoy. En un reembolso ParkingPro conserva la suya (0 aquí)."""
+        ahora = utcnow()
+        parqueadero = await self.parqueaderos.get(reserva["parqueadero_id"]) or {}
+        socio = await self.socios.get(parqueadero["socio_id"]) if parqueadero.get("socio_id") else None
+        pct = comision_pct(socio, parqueadero, ahora)
+        descuento = int(reserva["tarifa_aplicada"].get("descuento_pct") or 0)
+        comision, compensacion = montos_de_pago(monto, pct, descuento)
+        if estado == "reembolsado":
+            comision = Decimal("0.00")
         return {
             "_id": ObjectId(),
             "codigo": f"TX-{await self.contadores.siguiente('pagos'):06d}",
             "monto": to_decimal128(monto),
-            "fecha_pago": utcnow(),
+            "fecha_pago": ahora,
             "metodo_pago": metodo,
             "estado": estado,
+            "comision_pct": pct,
+            "comision": to_decimal128(comision),
+            "compensacion": to_decimal128(compensacion),
         }
 
     async def _cliente_por_placa(self, placa: str, nombre: Optional[str]) -> Tuple[Document, Document]:
@@ -491,7 +507,7 @@ class ReservaService:
         return reserva
 
     async def _de_parqueadero(self, empleado: Document, reserva_id: str) -> Document:
-        return await self._obtener(Principal("empleado", empleado), reserva_id)
+        return await self._obtener(Principal(empleado["cuenta"], empleado), reserva_id)
 
     async def _enriquecer_uno(self, reserva: Document) -> Document:
         return (await self.enriquecer([reserva]))[0]

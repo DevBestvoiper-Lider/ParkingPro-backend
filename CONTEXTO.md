@@ -4,7 +4,7 @@ Documento para retomar el trabajo sin depender de conversaciones anteriores. El 
 de endpoints, arranque y reglas de negocio está en [README.md](README.md); aquí va el **porqué**,
 el estado y lo que sigue.
 
-_Última actualización: 2026-10-05_
+_Última actualización: 2026-10-31_
 
 ## Qué es
 
@@ -35,15 +35,24 @@ parqueaderos disponibles en tiempo real en **Cartagena de Indias**.
 
 ## Estado actual
 
-- **Backend: completo y desplegado.** El código está en `/Users/Luis_Sandon/flutter/backend` y tiene 30 tests pasando.
+- **Backend: completo y desplegado.** El código está en `/Users/Luis_Sandon/flutter/backend` y tiene 54 tests pasando.
+  - La base de socios (fase 2) y el dinero (fase 3) están en el código y **todavía no en el servidor**. Para desplegarlos:
+    primero `python -m scripts.init_db` contra Atlas (validadores, índices, socio de prueba, accesos y condiciones),
+    luego actualizar la API. La migración no borra nada, así que la versión desplegada sigue funcionando entre los dos pasos.
   - **Servidor (desde 2026-10-01):** `http://bestcontactcenter.bestvoiper.com:8000` (Swagger en `/docs`).
     Se verificaron salud, rutas, datos del demo, login y WebSocket.
   - **Sin HTTPS todavía** (ver "Pendiente para producción").
 - **Frontend: en construcción.** Está en `/Users/Luis_Sandon/flutter/app` (paquete `parkingpro`, org `co.parkingpro`,
-  plataformas android, ios y web). Tiene 26 tests pasando.
-  - **Hechas:** Bienvenida, Login, Registro, Inicio, Perfil, Mapa GPS y el flujo de reserva completo, más la barra inferior.
+  plataformas android, ios y web). Tiene 74 tests pasando.
+  - **Hechas (app):** Bienvenida, Login, Registro, Inicio, Perfil, Mapa GPS y el flujo de reserva completo, más la barra inferior.
     Verificadas en el simulador de iOS contra Atlas; la release está instalada en el iPhone de Luis.
-  - **Pendientes:** el resto de pantallas; hoy muestran "Próximamente".
+  - **Hechas (panel web, 30 oct):** login de empleados, barra lateral, dashboard, reservas, pagos,
+    operación (grilla de plazas, check-in/out, mantenimiento, actividad en vivo), clientes,
+    vehículos (ficha sin correo ni si es Afiliado), usuarios (invitar, editar, desactivar),
+    sedes y zonas, y reportes. En Chrome se abre el panel; en el teléfono, la app. El token
+    del empleado va aparte (`parkingpro_panel_*`).
+  - **Pendientes:** el resto de pantallas de la app y del panel (tarifas, configuración);
+    hoy muestran "Próximamente".
   - Su `CLAUDE.md` importa este archivo.
 - **Base de datos:** MongoDB Atlas, base `parkingpro` (cluster `misgastos.t3vagzx.mongodb.net`), con dos juegos de datos:
   - Los datos de ejemplo del script original del equipo (Sede Chapinero, Bogotá).
@@ -56,11 +65,13 @@ parqueaderos disponibles en tiempo real en **Cartagena de Indias**.
 
 | Rol | Email |
 |---|---|
+| Socio de prueba, dueño de todos los parqueaderos (sale de la migración) | `socio@demo.parkingpro.co` |
 | Admin panel web | `admin@demo.parkingpro.co` |
 | Operador / Cajero | `operador@demo.parkingpro.co` / `cajero@demo.parkingpro.co` |
 | App, plan Afiliado, con sesión activa | `carlos.perez@demo.parkingpro.co` |
 | App, plan por uso | `maria.gomez@demo.parkingpro.co` |
 | Admin del parqueadero de ejemplo original | `laura.gomez@parkingprocentro.com` |
+| App + cámara (admin, misma cuenta) | `luisda3231@gmail.com` |
 
 ## Stack y decisiones técnicas
 
@@ -103,6 +114,29 @@ Las colecciones originales del equipo son `parqueaderos`, `empleados`, `usuarios
   - `notificaciones`.
   - `alertas_cupo`.
   - `interesados`: TTL; quién está viendo una sede.
+- **Capa de socios (fase 2, 2026-10-30):**
+  - Colección `socios`: dueño de parqueaderos. Cuenta aparte; para parquear usa una cuenta de usuario.
+  - `parqueaderos.socio_id`: el dueño.
+  - `empleados.accesos: [{parqueadero_id, permisos}]`: los parqueaderos donde trabaja. Solo un
+    administrador guarda permisos (puede estar en varios parqueaderos del mismo socio). Operador y
+    cajero tienen los de su rol y un solo acceso. `empleados.parqueadero_id` queda como **legado**:
+    ya no es obligatorio y el código nuevo no lo lee si hay `accesos`. Se borra cuando la API
+    desplegada esté actualizada.
+  - Colección `auditoria`: historial permanente (no expira). Quién, cuándo, qué acción, sobre qué y
+    los valores anteriores y nuevos, sin claves. Hoy registra socios, parqueaderos, sedes, empleados
+    (alta, cambios, permisos, accesos) y tarifas.
+  - Pendientes de esa fase: la categoría del parqueadero (espera valores) y el equipo interno de
+    ParkingPro (va con el panel interno, fase 4).
+- **Dinero (fase 3, 2026-10-30):**
+  - `socios.condiciones` (`comision_pct`, `limite_deuda`, `dias_gracia`, `politica`), `socios.liquida_desde`
+    (los pagos anteriores no se liquidan) y `socios.deuda` (`aviso_pct` enviado, `excedida_desde`).
+  - `parqueaderos.condiciones` (`comision_prueba_pct`, `prueba_hasta`, `politica`) y `parqueaderos.suspension`
+    (`motivo: deuda`, `desde`, `estado_anterior`).
+  - `reservas.pagos[]`: `comision_pct`, `comision` y `compensacion` (descuento Afiliado que pone ParkingPro).
+  - Colección `liquidaciones`: corte semanal por socio, único por (`socio_id`, `semana_inicio`).
+  - Las condiciones se **copian** de la política vigente al crear (hoy una sola, `defecto`, sale de `COMISION_PCT`,
+    `COMISION_PRUEBA_PCT`, `PRUEBA_DIAS`, `LIMITE_DEUDA` y `DEUDA_DIAS_GRACIA`). La colección `politicas` con
+    filtros y prioridad queda para cuando exista el panel interno (fase 4), que es quien las edita.
 
 Los validadores viven en `app/models/collections.py`. Para aplicarlos en Atlas corre
 `python -m scripts.init_db`; el script también asigna códigos a reservas viejas sin código.
@@ -128,6 +162,36 @@ Los validadores viven en `app/models/collections.py`. Para aplicarlos en Atlas c
 - **Métodos de pago:** el usuario solo paga con `app`; en caja se cobra con `efectivo` o `tarjeta`.
   Los reembolsos los hace el administrador o el cajero.
 - **Walk-in:** si llega un vehículo sin cuenta, se crea un "cliente ocasional" con su placa y sin acceso a la app.
+- **Socios y permisos:**
+  - El alta pública (`POST /parqueaderos`) crea la cuenta del socio y su primer parqueadero
+    (`en_prueba`), con un administrador opcional que recibe todos los permisos. Más parqueaderos:
+    `POST /socios/me/parqueaderos`. Las solicitudes con aprobación llegan en la fase 4.
+  - Permisos por parqueadero: `ver_operacion`, `cobrar_caja`, `hacer_reembolsos`, `gestionar_tarifas`,
+    `gestionar_sedes` (sedes, zonas y plazas), `gestionar_empleados`, `ver_metricas` (pagos y reportes),
+    `editar_configuracion`. El socio los tiene todos y no se le pueden quitar.
+  - Operador y cajero conservan lo que ya podían hacer: operación, caja y métricas; el cajero además reembolsa.
+  - Un administrador solo da o quita permisos que él tiene, no modifica a alguien con permisos que él
+    no tiene y no cambia los suyos. Desde un parqueadero no se cambia la cuenta (nombre, rol, estado,
+    clave) de quien también trabaja en otro; eso lo hace el socio.
+  - **El panel indica el parqueadero** con el encabezado `X-Parqueadero-Id`. Es opcional si la persona
+    tiene uno solo; con varios, sin el encabezado la API responde 400.
+  - Un email no se repite entre socios, empleados y usuarios, para que la recuperación de clave sea única.
+- **Dinero con los socios:**
+  - La comisión se cobra sobre lo que paga el cliente. En prueba (30 días desde que se crea cada parqueadero)
+    la comisión es `comision_prueba_pct` (0 %); después, la del socio (10 %).
+  - Pago por `app`: ParkingPro recibe el dinero y le debe al socio el monto menos la comisión.
+    Pago en caja: el socio recibe el dinero y le debe la comisión a ParkingPro.
+  - Afiliado: ParkingPro le paga al socio el descuento (`monto × d / (100 − d)`), así el socio recibe la tarifa completa.
+  - Reembolso: ParkingPro conserva su comisión. Un reembolso de $10.000 con 10 % deja al usuario en $0,
+    al socio en −$1.000 y a ParkingPro en +$1.000.
+  - Liquidación semanal, lunes a domingo en hora de Colombia. `total` positivo: ParkingPro transfiere;
+    negativo: el socio debe. El saldo de una semana sin pagar pasa a la siguiente (`trasladada`).
+  - Deuda: aviso al 80 % y al 100 % del límite (hoy en el log). Si sigue por encima del límite después de
+    `dias_gracia`, sus parqueaderos pasan a `suspendido`: no salen en el mapa ni reciben reservas nuevas,
+    pero las confirmadas siguen. Al bajar del límite vuelven a su estado anterior. Lo hace la tarea de cada minuto
+    y queda en `auditoria` con actor `sistema`.
+  - El límite se aplica a la deuda acumulada. El documento dice "límite mensual": **confirmar con el equipo**.
+  - Registrar que el socio pagó o que ParkingPro transfirió (estado `pagada`) llega con el panel interno (fase 4).
 
 ## Pendiente para producción
 
@@ -188,7 +252,7 @@ test/              # unit_test (errores, formatos, modelos) y flujo_test (navega
 ```bash
 cd /Users/Luis_Sandon/flutter/app
 flutter run                                       # elige el simulador o emulador
-flutter run -d chrome                             # panel/app en la web
+flutter run -d chrome                             # panel de empleados (login: admin@demo.parkingpro.co)
 flutter run --dart-define=API_URL=http://192.168.1.10:8000/api/v1   # celular físico
 flutter test
 ```
@@ -267,12 +331,32 @@ flutter install --release -d <id-del-iphone>          # flutter devices muestra 
 - **Firma:** automática con el equipo `3434FN38D7` (certificado Apple Development de Luis). Si es una cuenta
   de Apple gratuita, la app **vence a los 7 días** y hay que reinstalarla. La primera vez, en el iPhone:
   Ajustes → General → VPN y gestión de dispositivos → confiar en el desarrollador.
+- Si `flutter install` falla, `xcrun devicectl device install app --device <id> build/ios/iphoneos/Runner.app` funciona.
+
+### Cámara de pruebas (iPhone como cámara de portería)
+
+Herramienta del equipo para probar entradas y salidas sin cámara IP: el iPhone toma una foto de la placa
+cuando la detecta y lee el texto de esa foto (el OCR en vivo fallaba a menudo). Está en
+**Perfil → Cámara de pruebas**: siempre en debug, para `luisda3231@gmail.com`, y en release con
+`--dart-define=HERRAMIENTAS_PRUEBA=true`.
+
+- **Lectura:** cámara nativa (`AVCapture`) + Vision sobre la foto (`ios/Runner/AppDelegate.swift`,
+  vista `parkingpro/lector_placas`). El preview solo sirve para apuntar y disparar la captura;
+  no se registra desde el stream. No funciona en el simulador; ahí hay un botón para escribir la placa.
+- **Placas:** carro `ABC123`, moto `ABC12D`, corrigiendo confusiones por posición (O/0, I/1, S/5, B/8, Z/2)
+  en `features/camara/domain/placas.dart`. La misma placa no se repite durante 30 s.
+- **Qué registra:** si la sesión de la app es de un usuario cuyo email también es empleado (p. ej.
+  `luisda3231@gmail.com`), `POST /auth/camara` emite el token de empleado y no pide otra cuenta.
+  Si no, entra con email y clave de empleado (token solo en memoria). Entrada: si la placa tiene una
+  reserva en esa sede que empieza en menos de 30 min o está en curso, marca su entrada; si no, hace
+  un check-in sin reserva. Salida: check-out por placa.
+- Mientras la cámara está abierta, la pantalla no se apaga.
 
 ### Orden sugerido para las pantallas que faltan
 
 1. Mis reservas y Sesión activa (Finalizar sesión).
 2. Mis vehículos, Notificaciones y Planes.
-3. Panel web (login de empleados, dashboard, operación con WebSocket, pagos, reportes).
+3. El resto del panel web (tarifas, configuración). Login, dashboard, reservas, pagos, operación, clientes, vehículos, usuarios, sedes y reportes ya están.
 
 **Pantallas móviles del mockup** y su orden en el flujo:
 
@@ -299,6 +383,8 @@ Pagos, Clientes, Vehículos, Tarifas, Reportes, Usuarios, Sedes y Zonas, y Confi
 - **Login:** se envía `application/x-www-form-urlencoded` con `username` (el email) y `password`.
   Responde `{access_token, refresh_token, tipo}`. El access dura 60 min; `POST /auth/refresh`
   con `{refresh_token}` devuelve otro par, sin pedir la clave. El refresh no sirve como Bearer.
+  `POST /auth/camara` (con Bearer de usuario o empleado) emite un token de empleado si esa cuenta
+  también opera un parqueadero; sirve para no pedir una segunda clave en la cámara de portería.
   `POST /auth/recuperar` siempre responde el mismo mensaje. `POST /auth/restablecer` con el token
   del correo cambia la clave e invalida la sesión anterior.
 - **Mi actividad:** `GET /reservas/mias/actividad`. Gasto de los últimos 6 meses (hora de Colombia),

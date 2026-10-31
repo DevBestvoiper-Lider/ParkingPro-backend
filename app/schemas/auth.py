@@ -1,10 +1,10 @@
-from dataclasses import dataclass
-from typing import Any, Dict, Literal
+from dataclasses import dataclass, field
+from typing import Any, Dict, FrozenSet, Literal, Optional
 
 from bson import ObjectId
 from pydantic import BaseModel, EmailStr, Field
 
-TipoCuenta = Literal["usuario", "empleado"]
+TipoCuenta = Literal["usuario", "empleado", "socio"]
 
 
 class Token(BaseModel):
@@ -33,10 +33,15 @@ class Mensaje(BaseModel):
 
 @dataclass
 class Principal:
-    """Quién hace la petición: un usuario (cliente) o un empleado del parqueadero."""
+    """Quién hace la petición: un usuario (cliente), un empleado del parqueadero o un socio (dueño).
+
+    Para empleados y socios, `doc` lleva además `parqueadero_id` (el parqueadero en el que actúan),
+    `permisos` en ese parqueadero y `cuenta` (empleado o socio).
+    """
 
     tipo: TipoCuenta
     doc: Dict[str, Any]
+    permisos: FrozenSet[str] = field(default_factory=frozenset)
 
     @property
     def id(self) -> ObjectId:
@@ -49,3 +54,12 @@ class Principal:
     @property
     def es_empleado(self) -> bool:
         return self.tipo == "empleado"
+
+    @property
+    def es_personal(self) -> bool:
+        """Empleado o socio: opera un parqueadero desde el panel."""
+        return self.tipo in ("empleado", "socio")
+
+    @property
+    def parqueadero_id(self) -> Optional[ObjectId]:
+        return self.doc.get("parqueadero_id")

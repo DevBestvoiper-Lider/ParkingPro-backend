@@ -13,14 +13,19 @@ from decimal import Decimal
 from bson import ObjectId
 
 from app.core.config import settings
+from app.core.comision import condiciones_parqueadero, condiciones_socio
 from app.core.database import close_client, get_db
 from app.core.security import hash_password
-from app.core.utils import punto, to_decimal128, utcnow
+from app.core.utils import as_utc, punto, to_decimal128, utcnow
 from app.models import collections as c
+from app.models.enums import PERMISOS
 from app.repositories.contador_repository import ContadorRepository
+from app.services.acceso import accesos
 from scripts.demo_cartagena import crear_demo
 
 UBICACION_CHAPINERO = punto(4.6486, -74.0628)
+SOCIO_PRUEBA = "socio@demo.parkingpro.co"
+ADMIN_CAMARA = "luisda3231@gmail.com"
 
 
 async def migrar(db) -> None:
@@ -32,6 +37,83 @@ async def migrar(db) -> None:
         await db[c.RESERVAS].update_one({"_id": reserva["_id"]}, {"$set": {"codigo": codigo}})
     if sin_codigo:
         print(f"Códigos asignados a {len(sin_codigo)} reserva(s) existentes.")
+
+
+async def migrar_socios(db) -> None:
+    """Un socio de prueba queda dueño de los parqueaderos sin dueño; los empleados pasan a `accesos`.
+
+    Los administradores existentes quedan con todos los permisos. El `parqueadero_id` viejo se conserva
+    para que la API desplegada siga funcionando hasta actualizarla.
+    """
+    if await db[c.PARQUEADEROS].count_documents({"socio_id": {"$exists": False}}):
+        socio = await db[c.SOCIOS].find_one({"email": SOCIO_PRUEBA})
+        if not socio:
+            socio = {
+                "nombre": "Socio de prueba", "email": SOCIO_PRUEBA, "estado": "activo", "fecha_registro": utcnow(),
+                "password_hash": hash_password(settings.SEED_PASSWORD), "sesion_version": 0,
+            }
+            socio["_id"] = (await db[c.SOCIOS].insert_one(socio)).inserted_id
+        res = await db[c.PARQUEADEROS].update_many({"socio_id": {"$exists": False}}, {"$set": {"socio_id": socio["_id"]}})
+        print(f"{res.modified_count} parqueadero(s) quedan del socio de prueba ({SOCIO_PRUEBA}).")
+
+    sin_accesos = await db[c.EMPLEADOS].find({"accesos": {"$exists": False}}).to_list(None)
+    for empleado in sin_accesos:
+        await db[c.EMPLEADOS].update_one({"_id": empleado["_id"]}, {"$set": {"accesos": accesos(empleado)}})
+    if sin_accesos:
+        print(f"Accesos asignados a {len(sin_accesos)} empleado(s).")
+
+    # Dinero: lo pactado se copia de la política actual. Los pagos anteriores a hoy no se liquidan.
+    res = await db[c.SOCIOS].update_many(
+        {"condiciones": {"$exists": False}},
+        {"$set": {"condiciones": condiciones_socio(), "liquida_desde": utcnow()}},
+    )
+    if res.modified_count:
+        print(f"Condiciones asignadas a {res.modified_count} socio(s).")
+    sin_condiciones = await db[c.PARQUEADEROS].find({"condiciones": {"$exists": False}}).to_list(None)
+    for parqueadero in sin_condiciones:
+        condiciones = condiciones_parqueadero(as_utc(parqueadero.get("fecha_registro") or utcnow()))
+        await db[c.PARQUEADEROS].update_one({"_id": parqueadero["_id"]}, {"$set": {"condiciones": condiciones}})
+    if sin_condiciones:
+        print(f"Condiciones de prueba asignadas a {len(sin_condiciones)} parqueadero(s).")
+
+
+async def migrar_admin_camara(db) -> None:
+    """El admin de la app también opera la cámara, sin una segunda cuenta de empleado.
+
+    Si ya existe el empleado, no se toca su clave. Si no, se crea como administrador del
+    primer parqueadero activo (la contraseña de empleado es SEED_PASSWORD; la de la app no cambia).
+    """
+    parqueadero = await db[c.PARQUEADEROS].find_one({"estado": "activo"}, sort=[("fecha_registro", 1)])
+    if not parqueadero:
+        return
+    accesos_admin = [{"parqueadero_id": parqueadero["_id"], "permisos": sorted(PERMISOS)}]
+    existente = await db[c.EMPLEADOS].find_one({"email": ADMIN_CAMARA})
+    if existente:
+        cambios = {}
+        if existente.get("estado") != "activo":
+            cambios["estado"] = "activo"
+        if existente.get("rol") != "administrador":
+            cambios["rol"] = "administrador"
+        if "accesos" not in existente:
+            cambios["accesos"] = accesos_admin
+            cambios["parqueadero_id"] = parqueadero["_id"]
+        if cambios:
+            await db[c.EMPLEADOS].update_one({"_id": existente["_id"]}, {"$set": cambios})
+            print(f"Admin de cámara actualizado ({ADMIN_CAMARA}).")
+        return
+
+    usuario = await db[c.USUARIOS].find_one({"email": ADMIN_CAMARA})
+    await db[c.EMPLEADOS].insert_one({
+        "parqueadero_id": parqueadero["_id"],
+        "nombre": (usuario or {}).get("nombre") or "Luis Sandon",
+        "email": ADMIN_CAMARA,
+        "rol": "administrador",
+        "estado": "activo",
+        "password_hash": hash_password(settings.SEED_PASSWORD),
+        "sesion_version": 0,
+        "accesos": accesos_admin,
+    })
+    print(f"Admin de cámara creado ({ADMIN_CAMARA}) en {parqueadero['nombre']}.")
 
 
 async def seed(db) -> None:
@@ -134,13 +216,15 @@ async def main(with_seed: bool, with_demo: bool) -> None:
         print(f"Conectado a MongoDB, base '{settings.MONGODB_DB}'.")
         await c.apply_validators(db)
         print("Colecciones creadas/actualizadas con sus validadores.")
-        await migrar(db)
+        await migrar(db)  # antes de los índices: el código de reserva es único
         await c.ensure_indexes(db)
         print("Índices creados.")
         if with_seed:
             await seed(db)
         if with_demo:
             await crear_demo(db)
+        await migrar_socios(db)  # también para los datos de ejemplo recién creados
+        await migrar_admin_camara(db)
     finally:
         await close_client()
 

@@ -15,7 +15,7 @@ app/
 ├── routers/           # Endpoints por módulo
 └── tasks/             # Emails (background) y tareas periódicas (vencimientos)
 scripts/init_db.py     # Colecciones + validadores + índices (+ --seed / --demo)
-tests/                 # 30 tests con MongoDB en memoria
+tests/                 # 51 tests con MongoDB en memoria
 ```
 
 ## Arranque
@@ -38,6 +38,7 @@ Con Docker: `docker build -t parkingpro-api . && docker run --env-file .env -p 8
 
 | Rol | Email |
 |---|---|
+| Socio de prueba (dueño de todo, tras `init_db`) | `socio@demo.parkingpro.co` |
 | Administrador (panel web) | `admin@demo.parkingpro.co` |
 | Operador / Cajero | `operador@demo.parkingpro.co` · `cajero@demo.parkingpro.co` |
 | Usuario app, plan Afiliado, con sesión activa | `carlos.perez@demo.parkingpro.co` |
@@ -49,9 +50,15 @@ Con Docker: `docker build -t parkingpro-api . && docker run --env-file .env -p 8
 |---|---|
 | Invitado | Ver mapa, sedes, plazas, tarifas y planes; marcar interés |
 | Usuario (app) | Perfil, vehículos, reservar, pagar (`app`), finalizar su sesión, suscripción, alertas, notificaciones |
-| Empleado | Panel web (dashboard, reservas, pagos, clientes, reportes), confirmar, check-in/out, cobrar en caja |
-| Cajero / Administrador | Lo anterior + reembolsos |
-| Administrador | Lo anterior + sedes, espacios, tarifas y empleados |
+| Socio (dueño) | Todos los permisos en todos sus parqueaderos; su portafolio |
+| Administrador | Los permisos que le dio el socio u otro administrador, en cada parqueadero |
+| Operador | `ver_operacion`, `cobrar_caja`, `ver_metricas` (fijos) |
+| Cajero | Lo del operador + `hacer_reembolsos` (fijos) |
+
+Permisos por parqueadero: `ver_operacion` (dashboard, reservas, check-in/out, clientes),
+`cobrar_caja`, `hacer_reembolsos`, `gestionar_tarifas`, `gestionar_sedes` (sedes, zonas y plazas),
+`gestionar_empleados`, `ver_metricas` (pagos y reportes) y `editar_configuracion`.
+Quien trabaja en varios parqueaderos elige uno con el encabezado **`X-Parqueadero-Id`**.
 
 ## Endpoints por pantalla
 
@@ -59,7 +66,7 @@ Con Docker: `docker build -t parkingpro-api . && docker run --env-file .env -p 8
 
 | Pantalla | Endpoint |
 |---|---|
-| Login / Registro | `POST /auth/usuarios/login` · `POST /auth/usuarios/registro` · `POST /auth/refresh` |
+| Login / Registro | `POST /auth/usuarios/login` · `POST /auth/usuarios/registro` · `POST /auth/refresh` · `POST /auth/camara` |
 | Recuperar clave | `POST /auth/recuperar` · `POST /auth/restablecer` |
 | Inicio | `GET /reservas/mias/resumen` (próximas, vehículos, sesión activa, plan, notificaciones sin leer) |
 | Mi actividad | `GET /reservas/mias/actividad` (gasto por mes, horas, sedes, ahorro Afiliado) |
@@ -80,7 +87,7 @@ Con Docker: `docker build -t parkingpro-api . && docker run --env-file .env -p 8
 
 | Sección | Endpoint |
 |---|---|
-| Login | `POST /auth/empleados/login` · `POST /auth/refresh` · `POST /auth/recuperar` |
+| Login | `POST /auth/empleados/login` · `POST /auth/camara` · `POST /auth/refresh` · `POST /auth/recuperar` |
 | Dashboard | `GET /admin/dashboard?sede_id` |
 | Reservas | `GET /reservas?q&estado&zona&sede_id&desde&hasta` · `GET /admin/reservas/estadisticas?fecha` · `GET /admin/reservas/exportar` |
 | Operación | `GET /espacios/plazas` · `PATCH /espacios/{id}` · `POST /reservas/check-in-manual` · `POST /reservas/check-out-manual` · `POST /reservas/{id}/entrada\|salida\|confirmar\|cancelar` |
@@ -88,10 +95,21 @@ Con Docker: `docker build -t parkingpro-api . && docker run --env-file .env -p 8
 | Clientes / Vehículos | `GET /admin/clientes?q` · `GET /admin/vehiculos?q` |
 | Tarifas | `GET/POST /tarifas` · `PATCH/DELETE /tarifas/{id}` |
 | Reportes | `GET /admin/reportes?desde&hasta` (ingresos por día/método/zona, horas pico, duración promedio, cancelación) |
-| Usuarios (empleados) | `GET/POST /empleados` · `PATCH /empleados/{id}` |
+| Usuarios (empleados) | `GET/POST /empleados` · `PATCH /empleados/{id}` (incluye `permisos`) · `POST /empleados/accesos` · `DELETE /empleados/{id}/acceso` |
 | Sedes y Zonas | `POST /parqueaderos/{id}/sedes` · `PATCH /parqueaderos/{id}/sedes/{sede_id}` · `POST /espacios` |
 | Configuración | `PATCH /parqueaderos/{id}` |
 | Actividad reciente | `GET /admin/actividad` |
+
+**Socios**
+
+| Pantalla | Endpoint |
+|---|---|
+| Alta (socio + primer parqueadero) | `POST /parqueaderos` con `socio` y `administrador` opcional |
+| Login | `POST /auth/socios/login` · `POST /auth/refresh` · `POST /auth/recuperar` |
+| Portafolio | `GET /socios/me` · `GET /socios/me/parqueaderos` · `POST /socios/me/parqueaderos` |
+| Estado de cuenta | `GET /socios/me/cuenta`: lo de la semana, saldo anterior, deuda y uso del límite |
+| Liquidaciones | `GET /socios/me/liquidaciones` (semanales, la más reciente primero) |
+| Operar un parqueadero | Los mismos endpoints del panel, con `X-Parqueadero-Id` |
 
 Las fechas de `/admin` (`fecha`, `desde`, `hasta`) son días en hora de Colombia (`ZONA_HORARIA`).
 
@@ -125,6 +143,12 @@ Sin Redis funciona con **un proceso**. Para varios workers o instancias, define 
 - **Walk-in:** si llega un vehículo sin cuenta, `check-in-manual` crea un cliente ocasional con su placa.
   Si esa persona se registra después con otra placa, no se vinculan solas.
 - **Reembolsos:** se guardan como pagos con `estado: reembolsado` y restan de `total_pagado`.
+- **Comisión y liquidación:** cada pago guarda `comision_pct`, `comision` y `compensacion` (descuento Afiliado
+  que pone ParkingPro). Por semana: `total = pagos_app + compensacion − comision_app − comision_caja −
+  reembolsos_app + saldo_anterior`. En un reembolso ParkingPro conserva su comisión. Si la deuda supera
+  `limite_deuda` por más de `dias_gracia`, los parqueaderos del socio se suspenden; al bajar, se reactivan.
+  Los valores de un socio o parqueadero nuevo salen de `COMISION_PCT`, `COMISION_PRUEBA_PCT`, `PRUEBA_DIAS`,
+  `LIMITE_DEUDA` y `DEUDA_DIAS_GRACIA`.
 
 ## Cambios al modelo original (para Moon Modeler)
 
@@ -141,6 +165,12 @@ Sin Redis funciona con **un proceso**. Para varios workers o instancias, define 
   - `notificaciones`.
   - `alertas_cupo`.
   - `interesados`: quién está viendo una sede; expira a los 2 min.
+  - `socios`: dueños de parqueaderos.
+  - `auditoria`: historial permanente de cambios (no expira).
+- `parqueaderos.socio_id` (dueño) y `empleados.accesos[]` (`parqueadero_id` y `permisos`).
+  `empleados.parqueadero_id` queda como legado.
+- Dinero: `socios.condiciones`, `socios.liquida_desde`, `socios.deuda`, `parqueaderos.condiciones`,
+  `parqueaderos.suspension`, `reservas.pagos[].comision_pct|comision|compensacion` y la colección `liquidaciones`.
 
 ## Tests
 
@@ -155,7 +185,7 @@ pytest
 - **Pasarela de pagos real** (Wompi, ePayco o Mercado Pago). Hoy los pagos por `app` y las suscripciones
   se aprueban sin cobrar; están marcados con `TODO`.
 - **Notificaciones push** con Firebase Cloud Messaging. Hoy las notificaciones solo se guardan en la base.
-- **Emails reales.** `tasks/background.py` solo escribe en el log (bienvenida, reserva y recuperación).
+- **Emails reales.** `tasks/background.py` solo escribe en el log (bienvenida, reserva, recuperación y avisos de deuda).
   Con `DEBUG=true` el log incluye el token de recuperación, para probarlo sin correo.
 # ParkingPro-backend
 # ParkingPro-backend

@@ -3,7 +3,7 @@ from typing import List, Optional
 
 from fastapi import APIRouter, Depends, Query, status
 
-from app.dependencies import get_current_admin, get_espacio_service
+from app.dependencies import get_espacio_service, require_permiso
 from app.models.enums import EstadoEspacio, TipoEspacio
 from app.repositories.base import Document
 from app.schemas.espacio import EspacioCreate, EspacioRead, EspacioUpdate, PlazaRead, ZonaRead
@@ -63,7 +63,7 @@ async def obtener_espacio(espacio_id: str, service: EspacioService = Depends(get
 @router.post("", response_model=EspacioRead, status_code=status.HTTP_201_CREATED)
 async def crear_espacio(
     data: EspacioCreate,
-    admin: Document = Depends(get_current_admin),
+    admin: Document = Depends(require_permiso("gestionar_sedes")),
     service: EspacioService = Depends(get_espacio_service),
 ):
     return await service.crear(admin, data)
@@ -73,7 +73,7 @@ async def crear_espacio(
 async def actualizar_espacio(
     espacio_id: str,
     data: EspacioUpdate,
-    admin: Document = Depends(get_current_admin),
+    admin: Document = Depends(require_permiso("gestionar_sedes")),
     service: EspacioService = Depends(get_espacio_service),
 ):
     return await service.actualizar(admin, espacio_id, data)

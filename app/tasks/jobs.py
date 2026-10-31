@@ -19,6 +19,7 @@ from app.repositories.alerta_repository import AlertaRepository
 from app.repositories.notificacion_repository import NotificacionRepository
 from app.repositories.suscripcion_repository import SuscripcionRepository
 from app.services.eventos import Eventos
+from app.services.liquidacion_service import LiquidacionService
 from app.services.notificacion_service import NotificacionService
 from app.services.suscripcion_service import DURACION_PLAN
 
@@ -89,6 +90,7 @@ async def correr_tareas(db, hub: HubTiempoReal) -> None:
     suscripciones = await vencer_suscripciones(db)
     if vencidas or suscripciones:
         logger.info("Tareas: %s reservas vencidas, %s suscripciones actualizadas", vencidas, suscripciones)
+    await LiquidacionService.de(db).correr()
 
 
 async def ejecutar_periodicamente(db, hub: HubTiempoReal) -> None:

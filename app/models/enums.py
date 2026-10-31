@@ -1,9 +1,10 @@
-from typing import Literal
+from typing import Dict, FrozenSet, Literal
 
 EstadoParqueadero = Literal["activo", "suspendido", "en_prueba"]
 EstadoSede = Literal["activa", "inactiva", "mantenimiento"]
 RolEmpleado = Literal["administrador", "operador", "cajero"]
 EstadoEmpleado = Literal["activo", "inactivo"]
+EstadoSocio = Literal["activo", "inactivo"]
 TipoEspacio = Literal["carro", "moto", "discapacitado"]
 EstadoEspacio = Literal["disponible", "ocupado", "mantenimiento"]
 TipoVehiculo = Literal["carro", "moto"]
@@ -23,3 +24,17 @@ TipoActividad = Literal[
     "reserva_creada", "reserva_confirmada", "reserva_cancelada", "reserva_vencida",
     "check_in", "check_out", "pago", "reembolso", "espacio_estado",
 ]
+
+# Permisos de un administrador en cada parqueadero. El socio siempre los tiene todos.
+Permiso = Literal[
+    "ver_operacion", "cobrar_caja", "hacer_reembolsos", "gestionar_tarifas",
+    "gestionar_sedes", "gestionar_empleados", "ver_metricas", "editar_configuracion",
+]
+PERMISOS: FrozenSet[str] = frozenset(Permiso.__args__)  # type: ignore[attr-defined]
+# Operador y cajero tienen roles fijos: conservan lo que ya podían hacer.
+PERMISOS_POR_ROL: Dict[str, FrozenSet[str]] = {
+    "operador": frozenset({"ver_operacion", "cobrar_caja", "ver_metricas"}),
+    "cajero": frozenset({"ver_operacion", "cobrar_caja", "ver_metricas", "hacer_reembolsos"}),
+}
+
+AccionAuditoria = Literal["crear", "actualizar", "eliminar", "dar_acceso", "quitar_acceso"]

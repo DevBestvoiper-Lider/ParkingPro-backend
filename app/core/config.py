@@ -34,5 +34,13 @@ class Settings(BaseSettings):
     AFILIADO_DESCUENTO_PCT: int = 15
     AFILIADO_CUPO_PRIORITARIO_PCT: int = 10  # % de plazas reservado a afiliados en hora pico
 
+    # Política por defecto para socios y parqueaderos nuevos. Se copia al crearlos: cambiarla
+    # después solo afecta a los nuevos. Valores provisionales hasta que el equipo los defina.
+    COMISION_PCT: int = 10
+    COMISION_PRUEBA_PCT: int = 0  # 0 = no se cobra comisión durante la prueba
+    PRUEBA_DIAS: int = 30
+    LIMITE_DEUDA: int = 500000  # pesos
+    DEUDA_DIAS_GRACIA: int = 7
+
 
 settings = Settings()

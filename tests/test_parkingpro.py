@@ -22,6 +22,7 @@ async def _setup_parqueadero(client, nit="900-1", admin_email="admin@p.com"):
         "nombre": "ParkingPro Centro",
         "nit": nit,
         "email_contacto": "contacto@p.com",
+        "socio": {"nombre": "Socio", "email": f"socio.{admin_email}", "password": "secreto123"},
         "administrador": {"nombre": "Laura", "email": admin_email, "password": "secreto123"},
     })
     assert res.status_code == 201, res.text
@@ -195,6 +196,7 @@ async def test_datos_duplicados(client):
     await _setup_parqueadero(client)
     res = await client.post(f"{API}/parqueaderos", json={
         "nombre": "Otro", "nit": "900-1", "email_contacto": "x@p.com",
+        "socio": {"nombre": "S", "email": "nuevo.socio@p.com", "password": "secreto123"},
         "administrador": {"nombre": "A", "email": "nuevo@p.com", "password": "secreto123"},
     })
     assert res.status_code == 409

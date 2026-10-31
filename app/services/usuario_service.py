@@ -4,17 +4,20 @@ from fastapi import HTTPException, status
 from app.core.security import hash_password
 from app.core.utils import clean, parse_oid
 from app.repositories.base import Document
+from app.repositories.socio_repository import SocioRepository
 from app.repositories.usuario_repository import UsuarioRepository
 from app.schemas.usuario import UsuarioCreate, UsuarioUpdate, VehiculoCreate
 
 
 class UsuarioService:
-    def __init__(self, repository: UsuarioRepository):
+    def __init__(self, repository: UsuarioRepository, socios: SocioRepository):
         self.repository = repository
+        self.socios = socios
 
     async def registrar(self, data: UsuarioCreate) -> Document:
         email = data.email.lower()
-        if await self.repository.get_by_email(email):
+        # Un socio parquea con otra cuenta; compartir el email confundiría la recuperación de clave.
+        if await self.repository.get_by_email(email) or await self.socios.get_by_email(email):
             raise HTTPException(status.HTTP_409_CONFLICT, "El email ya está registrado")
         return await self.repository.insert(clean({
             "nombre": data.nombre,

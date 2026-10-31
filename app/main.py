@@ -10,7 +10,7 @@ from app.core.database import close_client, get_db
 from app.core.realtime import hub
 from app.models.collections import ensure_indexes
 from app.routers import (
-    admin, auth, empleados, espacios, notificaciones, parqueaderos, reservas, suscripciones, tarifas,
+    admin, auth, empleados, espacios, notificaciones, parqueaderos, reservas, socios, suscripciones, tarifas,
     tiempo_real, usuarios,
 )
 from app.tasks.jobs import ejecutar_periodicamente
@@ -47,7 +47,7 @@ app.add_middleware(
 # "API Gateway": todas las rutas se agrupan bajo /api/v1
 api_router = APIRouter(prefix="/api/v1")
 for module in (
-    auth, usuarios, parqueaderos, empleados, espacios, tarifas, reservas, suscripciones, notificaciones,
+    auth, usuarios, socios, parqueaderos, empleados, espacios, tarifas, reservas, suscripciones, notificaciones,
     tiempo_real, admin,
 ):
     api_router.include_router(module.router)

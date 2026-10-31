@@ -11,6 +11,7 @@ from app.core.security import create_access_token, create_refresh_token, decode_
 from app.core.utils import utcnow
 from app.repositories.base import BaseRepository, Document
 from app.repositories.empleado_repository import EmpleadoRepository
+from app.repositories.socio_repository import SocioRepository
 from app.repositories.usuario_repository import UsuarioRepository
 from app.schemas.auth import TipoCuenta, Token
 
@@ -26,9 +27,11 @@ RESET_INVALIDO = HTTPException(
 
 
 class AuthService:
-    def __init__(self, usuarios: UsuarioRepository, empleados: EmpleadoRepository):
+    def __init__(self, usuarios: UsuarioRepository, empleados: EmpleadoRepository, socios: SocioRepository):
         self.usuarios = usuarios
         self.empleados = empleados
+        self.socios = socios
+        self._repos = {"usuario": usuarios, "empleado": empleados, "socio": socios}
 
     async def login_usuario(self, email: str, password: str) -> Token:
         usuario = await self.usuarios.get_by_email(email)
@@ -44,20 +47,48 @@ class AuthService:
             raise HTTPException(status.HTTP_403_FORBIDDEN, "Empleado inactivo")
         return self._emitir("empleado", empleado)
 
+    async def login_socio(self, email: str, password: str) -> Token:
+        socio = await self.socios.get_by_email(email)
+        if not socio or not verify_password(password, socio.get("password_hash", "")):
+            raise CREDENCIALES_INVALIDAS
+        if socio["estado"] != "activo":
+            raise HTTPException(status.HTTP_403_FORBIDDEN, "Socio inactivo")
+        return self._emitir("socio", socio)
+
+    async def sesion_camara(self, principal) -> Token:
+        """Token de empleado para la cámara de portería, sin pedir otra clave.
+
+        Si ya es empleado, reemite su sesión. Si es usuario (o socio) con el mismo email
+        que un empleado activo, emite la sesión de ese empleado.
+        """
+        if principal.es_empleado:
+            empleado = await self.empleados.get(principal.id)
+            if not empleado or empleado.get("estado") != "activo":
+                raise HTTPException(status.HTTP_403_FORBIDDEN, "Empleado inactivo")
+            return self._emitir("empleado", empleado)
+
+        email = str(principal.doc.get("email") or "").lower()
+        empleado = await self.empleados.get_by_email(email) if email else None
+        if not empleado or empleado.get("estado") != "activo":
+            raise HTTPException(
+                status.HTTP_403_FORBIDDEN,
+                "Esta cuenta no opera la cámara. Pide acceso de empleado al parqueadero.",
+            )
+        return self._emitir("empleado", empleado)
+
     async def refrescar(self, refresh_token: str) -> Token:
         payload = decode_jwt(refresh_token)
         if not payload or payload.get("typ") != "refresh" or not payload.get("sub"):
             raise CREDENCIALES_INVALIDAS
         tipo, _, raw_id = str(payload["sub"]).partition(":")
-        if tipo not in ("usuario", "empleado") or not ObjectId.is_valid(raw_id):
+        if tipo not in self._repos or not ObjectId.is_valid(raw_id):
             raise CREDENCIALES_INVALIDAS
-        tipo_cuenta: TipoCuenta = "usuario" if tipo == "usuario" else "empleado"
-        repo = self.usuarios if tipo_cuenta == "usuario" else self.empleados
-        doc = await repo.get(ObjectId(raw_id))
+        tipo_cuenta: TipoCuenta = tipo  # type: ignore[assignment]
+        doc = await self._repos[tipo].get(ObjectId(raw_id))
         if not doc or doc.get("sesion_version", 0) != payload.get("ver", 0):
             raise CREDENCIALES_INVALIDAS
-        if tipo_cuenta == "empleado" and doc.get("estado") != "activo":
-            raise HTTPException(status.HTTP_403_FORBIDDEN, "Empleado inactivo")
+        if tipo_cuenta != "usuario" and doc.get("estado") != "activo":
+            raise HTTPException(status.HTTP_403_FORBIDDEN, "Cuenta inactiva")
         return self._emitir(tipo_cuenta, doc)
 
     async def solicitar_recuperacion(self, email: str) -> Optional[Tuple[str, str, str]]:
@@ -76,7 +107,7 @@ class AuthService:
     async def restablecer(self, token: str, password: str) -> None:
         token_hash = _hash_token(token)
         ahora = utcnow()
-        for repo in (self.usuarios, self.empleados):
+        for repo in self._repos.values():
             doc = await repo.collection.find_one({
                 "reset_token_hash": token_hash,
                 "reset_expira": {"$gt": ahora},
@@ -102,6 +133,9 @@ class AuthService:
         empleado = await self.empleados.get_by_email(email)
         if empleado and empleado.get("password_hash") and empleado.get("estado") == "activo":
             return "empleado", self.empleados, empleado
+        socio = await self.socios.get_by_email(email)
+        if socio and socio.get("password_hash") and socio.get("estado") == "activo":
+            return "socio", self.socios, socio
         return None
 
     @staticmethod

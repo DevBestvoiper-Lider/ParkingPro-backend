@@ -16,6 +16,10 @@ async def send_reserva_email(email: str, reserva_id: str, evento: str) -> None:
     logger.info("Notificando a %s: reserva %s %s", email, reserva_id, evento)
 
 
+async def send_aviso_deuda_email(email: str, nombre: str, pct: int, deuda: str, limite: str) -> None:
+    logger.info("Aviso de deuda a %s (%s): %s%% del límite (%s de %s)", email, nombre, pct, deuda, limite)
+
+
 async def send_password_reset_email(email: str, nombre: str, token: str) -> None:
     logger.info("Correo de recuperación de contraseña para %s (%s)", email, nombre)
     if settings.DEBUG:

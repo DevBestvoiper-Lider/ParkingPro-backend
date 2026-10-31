@@ -5,6 +5,7 @@ from pydantic import BaseModel, EmailStr, Field, model_validator
 
 from app.models.enums import EstadoParqueadero, EstadoSede
 from app.schemas.common import MongoModel, Money, PyObjectId
+from app.schemas.socio import SocioCreate
 
 
 class Coordenadas(BaseModel):
@@ -77,12 +78,21 @@ class AdministradorCreate(BaseModel):
     password: str = Field(min_length=8)
 
 
-class ParqueaderoCreate(BaseModel):
+class ParqueaderoNuevo(BaseModel):
+    """Un parqueadero que el socio agrega a su portafolio."""
+
     nombre: str = Field(min_length=1)
     nit: str = Field(min_length=3)
     email_contacto: EmailStr
     telefono: Optional[str] = None
-    administrador: AdministradorCreate
+    # Opcional: el socio puede operar solo. Si viene, queda con todos los permisos.
+    administrador: Optional[AdministradorCreate] = None
+
+
+class ParqueaderoCreate(ParqueaderoNuevo):
+    """Alta pública: crea la cuenta del socio (dueño) y su primer parqueadero."""
+
+    socio: SocioCreate
 
 
 class ParqueaderoUpdate(BaseModel):

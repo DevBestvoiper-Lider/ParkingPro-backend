@@ -110,3 +110,38 @@ async def test_empleado_tambien_renueva_y_recupera(client, monkeypatch):
     assert res.status_code == 204
     assert (await client.post(f"{API}/auth/refresh", json={"refresh_token": tokens["refresh_token"]})).status_code == 401
     await _login(client, "admin@p.com", password="otraclave1", tipo="empleados")
+
+
+async def test_usuario_con_el_mismo_email_de_empleado_abre_la_camara(client):
+    await _setup_parqueadero(client)
+    await _setup_usuario(client, "admin@p.com")
+    tokens = await _login(client, "admin@p.com")
+    res = await client.post(
+        f"{API}/auth/camara", headers={"Authorization": f"Bearer {tokens['access_token']}"}
+    )
+    assert res.status_code == 200, res.text
+    assert res.json()["tipo"] == "empleado"
+    yo = await client.get(
+        f"{API}/empleados/me", headers={"Authorization": f"Bearer {res.json()['access_token']}"}
+    )
+    assert yo.status_code == 200
+    assert yo.json()["email"] == "admin@p.com"
+
+
+async def test_empleado_abre_la_camara_con_su_propia_sesion(client):
+    await _setup_parqueadero(client)
+    tokens = await _login(client, "admin@p.com", tipo="empleados")
+    res = await client.post(
+        f"{API}/auth/camara", headers={"Authorization": f"Bearer {tokens['access_token']}"}
+    )
+    assert res.status_code == 200, res.text
+    assert res.json()["tipo"] == "empleado"
+
+
+async def test_usuario_sin_empleado_no_abre_la_camara(client):
+    await _setup_usuario(client)
+    tokens = await _login(client, "carlos@example.com")
+    res = await client.post(
+        f"{API}/auth/camara", headers={"Authorization": f"Bearer {tokens['access_token']}"}
+    )
+    assert res.status_code == 403

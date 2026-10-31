@@ -1,8 +1,8 @@
 from fastapi import APIRouter, BackgroundTasks, Depends, status
 from fastapi.security import OAuth2PasswordRequestForm
 
-from app.dependencies import get_auth_service, get_usuario_service
-from app.schemas.auth import Mensaje, RecuperarClave, RefreshRequest, RestablecerClave, Token
+from app.dependencies import get_auth_service, get_principal, get_usuario_service
+from app.schemas.auth import Mensaje, Principal, RecuperarClave, RefreshRequest, RestablecerClave, Token
 from app.schemas.usuario import UsuarioCreate, UsuarioRead
 from app.services.auth_service import AuthService
 from app.services.usuario_service import UsuarioService
@@ -41,6 +41,24 @@ async def login_empleado(
     service: AuthService = Depends(get_auth_service),
 ):
     return await service.login_empleado(form.username, form.password)
+
+
+@router.post("/camara", response_model=Token)
+async def sesion_camara(
+    principal: Principal = Depends(get_principal),
+    service: AuthService = Depends(get_auth_service),
+):
+    """Abre la cámara de portería con la sesión actual si esa cuenta también es empleado."""
+    return await service.sesion_camara(principal)
+
+
+@router.post("/socios/login", response_model=Token)
+async def login_socio(
+    form: OAuth2PasswordRequestForm = Depends(),
+    service: AuthService = Depends(get_auth_service),
+):
+    """Dueño de parqueaderos. Es una cuenta aparte: para parquear usa una cuenta de usuario."""
+    return await service.login_socio(form.username, form.password)
 
 
 @router.post("/refresh", response_model=Token)

@@ -3,13 +3,7 @@ from typing import List, Optional
 
 from fastapi import APIRouter, BackgroundTasks, Depends, Query, status
 
-from app.dependencies import (
-    get_current_empleado,
-    get_current_usuario,
-    get_principal,
-    get_reserva_service,
-    require_roles,
-)
+from app.dependencies import get_current_usuario, get_reserva_service, principal_con_permiso, require_permiso
 from app.models.enums import EstadoReserva
 from app.repositories.base import Document
 from app.schemas.auth import Principal
@@ -21,6 +15,10 @@ from app.services.reserva_service import ReservaService
 from app.tasks.background import send_reserva_email
 
 router = APIRouter(prefix="/reservas", tags=["reservas"])
+
+ver_operacion = require_permiso("ver_operacion")
+# El usuario de la app, o el personal con permiso de operación.
+principal_en_operacion = principal_con_permiso("ver_operacion")
 
 
 @router.post("", response_model=ReservaRead, status_code=status.HTTP_201_CREATED)
@@ -75,7 +73,7 @@ async def listar_reservas_parqueadero(
     hasta: Optional[datetime] = None,
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=500),
-    empleado: Document = Depends(get_current_empleado),
+    empleado: Document = Depends(ver_operacion),
     service: ReservaService = Depends(get_reserva_service),
 ):
     return await service.listar_de_parqueadero(
@@ -86,7 +84,7 @@ async def listar_reservas_parqueadero(
 @router.post("/check-in-manual", response_model=ReservaRead, status_code=status.HTTP_201_CREATED)
 async def check_in_manual(
     data: CheckInManual,
-    empleado: Document = Depends(get_current_empleado),
+    empleado: Document = Depends(ver_operacion),
     service: ReservaService = Depends(get_reserva_service),
 ):
     """Entrada en caseta de un vehículo sin reserva: asigna plaza y tarifa si no se indican."""
@@ -96,7 +94,7 @@ async def check_in_manual(
 @router.post("/check-out-manual", response_model=ReservaRead)
 async def check_out_manual(
     data: CheckOutManual,
-    empleado: Document = Depends(get_current_empleado),
+    empleado: Document = Depends(ver_operacion),
     service: ReservaService = Depends(get_reserva_service),
 ):
     """Salida en caseta buscando la sesión activa por placa."""
@@ -106,7 +104,7 @@ async def check_out_manual(
 @router.get("/{reserva_id}", response_model=ReservaRead)
 async def obtener_reserva(
     reserva_id: str,
-    principal: Principal = Depends(get_principal),
+    principal: Principal = Depends(principal_en_operacion),
     service: ReservaService = Depends(get_reserva_service),
 ):
     return await service.obtener(principal, reserva_id)
@@ -115,7 +113,7 @@ async def obtener_reserva(
 @router.post("/{reserva_id}/confirmar", response_model=ReservaRead)
 async def confirmar_reserva(
     reserva_id: str,
-    empleado: Document = Depends(get_current_empleado),
+    empleado: Document = Depends(ver_operacion),
     service: ReservaService = Depends(get_reserva_service),
 ):
     return await service.confirmar(empleado, reserva_id)
@@ -124,7 +122,7 @@ async def confirmar_reserva(
 @router.post("/{reserva_id}/cancelar", response_model=ReservaRead)
 async def cancelar_reserva(
     reserva_id: str,
-    principal: Principal = Depends(get_principal),
+    principal: Principal = Depends(principal_en_operacion),
     service: ReservaService = Depends(get_reserva_service),
 ):
     return await service.cancelar(principal, reserva_id)
@@ -133,7 +131,7 @@ async def cancelar_reserva(
 @router.post("/{reserva_id}/entrada", response_model=ReservaRead)
 async def registrar_entrada(
     reserva_id: str,
-    empleado: Document = Depends(get_current_empleado),
+    empleado: Document = Depends(ver_operacion),
     service: ReservaService = Depends(get_reserva_service),
 ):
     return await service.registrar_entrada(empleado, reserva_id)
@@ -142,7 +140,7 @@ async def registrar_entrada(
 @router.post("/{reserva_id}/salida", response_model=ReservaRead)
 async def registrar_salida(
     reserva_id: str,
-    principal: Principal = Depends(get_principal),
+    principal: Principal = Depends(principal_en_operacion),
     service: ReservaService = Depends(get_reserva_service),
 ):
     """Empleado en caseta, o el usuario con 'Finalizar sesión' desde la app."""
@@ -153,7 +151,7 @@ async def registrar_salida(
 async def registrar_pago(
     reserva_id: str,
     data: PagoCreate,
-    principal: Principal = Depends(get_principal),
+    principal: Principal = Depends(principal_con_permiso("cobrar_caja")),
     service: ReservaService = Depends(get_reserva_service),
 ):
     return await service.registrar_pago(principal, reserva_id, data)
@@ -163,7 +161,7 @@ async def registrar_pago(
 async def reembolsar(
     reserva_id: str,
     data: ReembolsoCreate,
-    empleado: Document = Depends(require_roles("administrador", "cajero")),
+    empleado: Document = Depends(require_permiso("hacer_reembolsos")),
     service: ReservaService = Depends(get_reserva_service),
 ):
     return await service.reembolsar(empleado, reserva_id, data)

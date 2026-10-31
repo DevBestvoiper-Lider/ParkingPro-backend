@@ -2,7 +2,7 @@ from typing import List, Optional
 
 from fastapi import APIRouter, Depends, status
 
-from app.dependencies import get_current_admin, get_tarifa_service
+from app.dependencies import get_tarifa_service, require_permiso
 from app.models.enums import TipoVehiculo
 from app.repositories.base import Document
 from app.schemas.tarifa import TarifaCreate, TarifaRead, TarifaUpdate
@@ -23,7 +23,7 @@ async def listar_tarifas(
 @router.post("", response_model=TarifaRead, status_code=status.HTTP_201_CREATED)
 async def crear_tarifa(
     data: TarifaCreate,
-    admin: Document = Depends(get_current_admin),
+    admin: Document = Depends(require_permiso("gestionar_tarifas")),
     service: TarifaService = Depends(get_tarifa_service),
 ):
     return await service.crear(admin, data)
@@ -33,7 +33,7 @@ async def crear_tarifa(
 async def actualizar_tarifa(
     tarifa_id: str,
     data: TarifaUpdate,
-    admin: Document = Depends(get_current_admin),
+    admin: Document = Depends(require_permiso("gestionar_tarifas")),
     service: TarifaService = Depends(get_tarifa_service),
 ):
     return await service.actualizar(admin, tarifa_id, data)
@@ -42,7 +42,7 @@ async def actualizar_tarifa(
 @router.delete("/{tarifa_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def eliminar_tarifa(
     tarifa_id: str,
-    admin: Document = Depends(get_current_admin),
+    admin: Document = Depends(require_permiso("gestionar_tarifas")),
     service: TarifaService = Depends(get_tarifa_service),
 ):
     await service.eliminar(admin, tarifa_id)
